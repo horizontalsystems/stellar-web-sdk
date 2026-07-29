@@ -1,0 +1,19 @@
+{
+  "name": "stellar-web-sdk-vanilla-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node scripts/serve.mjs",
+    "serve": "node scripts/serve.mjs"
+  },
+  "dependencies": {
+    "stellar-web-sdk": "file:../..",
+    "@stellar/stellar-sdk": "^13.3.0"
+  },
+  "devDependencies": {
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.1"
+  }
+}

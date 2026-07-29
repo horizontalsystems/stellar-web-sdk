@@ -93,6 +93,71 @@ const final = await sdk.pollTrack(route.uuid, execution.inboundTxHash, {
 })
 ```
 
+## React & Next.js
+
+React bindings live at the `stellar-web-sdk/react` entry point (`react >= 18` is an optional peer
+dependency). Everything there is `'use client'` — the SDK holds live `fetch`/`WebSocket` handles, so
+mount it under a client boundary. The **core** entry (`stellar-web-sdk`) touches no browser globals at
+import time, so it's safe to import in React Server Components / the Next.js App Router.
+
+Wrap your tree once, then drive the lifecycle with hooks:
+
+```tsx
+'use client'
+import { StellarSwapProvider, useQuote, useExecuteSwap } from 'stellar-web-sdk/react'
+import { keypairSigner } from 'stellar-web-sdk'
+
+// Give the provider a STABLE config (module const / useMemo) or a prebuilt `sdk` instance.
+const config = { apiBaseUrl: '/api/uswap', apiKey: '…' }
+
+function App() {
+  return (
+    <StellarSwapProvider config={config}>
+      <Swap />
+    </StellarSwapProvider>
+  )
+}
+
+function Swap() {
+  const q = useQuote()                 // { quote, data, error, isLoading, reset }
+  const swap = useExecuteSwap()        // commit → execute → track, + live broker state
+
+  return (
+    <>
+      <button onClick={() => q.quote({ sellAsset: 'native', buyAsset: 'USDC:GA5Z…', sellAmount: '10', slippage: 1, sourceAddress: 'GTRADER…' })}>
+        Quote
+      </button>
+      <button
+        disabled={!q.data?.provider || swap.isLoading}
+        onClick={() => swap.swap({
+          sellAsset: 'native', buyAsset: 'USDC:GA5Z…', sellAmount: '10', slippage: 1,
+          sourceAddress: 'GTRADER…', provider: q.data!.provider!, signer: keypairSigner('S…'),
+        })}
+      >
+        {swap.isLoading ? swap.status : 'Swap'}
+      </button>
+      {/* broker routes stream live state: swap.brokerPhase / swap.brokerQuote / swap.brokerProgress */}
+    </>
+  )
+}
+```
+
+Hooks: `useStellarSwap()` (the SDK from context), `useQuote()`, `useExecuteSwap()`, and
+`useTrackStatus(uuid, hash?, opts?)` for standalone polling. `useQuote`/`useExecuteSwap` drop
+superseded/aborted results, so rapid re-quoting never flashes a stale price.
+
+> **Keep your API key server-side.** A `NEXT_PUBLIC_` key ships to the browser. In production point
+> `apiBaseUrl` at a Next.js route handler that injects `X-API-Key` and proxies uswap-server (StellarBroker
+> WebSocket sessions still run directly from the browser). A runnable App Router example — including that
+> proxy pattern — is in [`examples/nextjs`](examples/nextjs).
+
+Build the React entry with `npm run build:all` (or `build:react`); the default `npm run build` only
+emits the framework-agnostic core, so it stays green without React installed.
+
+Runnable examples of the full swap flow live in [`examples/`](examples): **vanilla JS** (core SDK,
+no framework), **React** (these hooks on a plain esbuild bundle), and **Next.js** (App Router,
+including the key-proxy pattern).
+
 ## The waterfall (client policy)
 
 `sdk.quote()` implements the policy from the guide exactly:

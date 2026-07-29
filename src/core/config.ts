@@ -34,7 +34,10 @@ export function resolveConfig(config: StellarSwapConfig): ResolvedConfig {
   if (!config.apiBaseUrl) throw new StellarSwapError('invalid_config', 'apiBaseUrl is required')
   if (!config.apiKey) throw new StellarSwapError('invalid_config', 'apiKey is required')
 
-  const fetchImpl = config.fetch ?? globalThis.fetch
+  // Bind the global default to `globalThis`: the SDK calls `config.fetch(...)` as a method, so an
+  // unbound browser `window.fetch` would run with `this === config` and throw "Illegal invocation".
+  // A caller-supplied `fetch` is left as-is (bind it yourself if it needs a receiver).
+  const fetchImpl = config.fetch ?? (typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : undefined)
   if (typeof fetchImpl !== 'function') {
     throw new StellarSwapError(
       'invalid_config',

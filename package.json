@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
     }
   },
   "files": [
@@ -19,7 +23,10 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:react": "tsc -p tsconfig.react.json",
+    "build:all": "npm run build && npm run build:react",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:react": "tsc -p tsconfig.react.json --noEmit",
     "test": "npm run build && node test/run.mjs",
     "demo:build": "npm run build && node demo/build.mjs",
     "demo": "npm run demo:build && node demo/serve.mjs",
@@ -28,8 +35,17 @@
   "dependencies": {
     "@stellar/stellar-sdk": "^13.3.0"
   },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.19.43",
+    "@types/react": "^18.3.0",
     "buffer": "^6.0.3",
     "esbuild": "^0.28.1",
     "typescript": "^5.6.0"

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>stellar-web-sdk — vanilla JS example</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <h1>Stellar swap</h1>
+    <p class="lead">
+      Vanilla JS on the core <code>StellarSwapSDK</code>. <b>Mainnet only</b> — a swap moves real
+      funds. Use a dedicated, low-balance account; the secret key stays in your browser.
+    </p>
+
+    <fieldset>
+      <label>API base URL <input id="apiBaseUrl" value="https://swap-dev.unstoppable.money/api" /></label>
+      <label>API key (X-API-Key) <input id="apiKey" type="password" placeholder="your SDK key" /></label>
+      <label>Sell asset <input id="sellAsset" value="XLM.XLM" /></label>
+      <label>Buy asset <input id="buyAsset" value="XLM.USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" /></label>
+      <label>Sell amount <input id="sellAmount" value="10" /></label>
+      <label>Slippage (%) <input id="slippage" value="1" /></label>
+      <label>Secret key (S…) — dedicated account only <input id="secretKey" type="password" placeholder="S… (kept client-side)" /></label>
+    </fieldset>
+
+    <div class="row">
+      <button id="quoteBtn">Get quote</button>
+      <button id="trustBtn" hidden>Activate trustline</button>
+      <button id="swapBtn" disabled>Swap</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script type="module" src="./app.bundle.js"></script>
+  </body>
+</html>
