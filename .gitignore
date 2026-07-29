@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+.idea/
+*.log
+
+# demo build output
+demo/app.bundle.js
+demo/app.bundle.js.map
+
+# secrets
+.env

@@ -1,0 +1,49 @@
+{
+  "name": "stellar-web-sdk",
+  "version": "0.1.0",
+  "description": "Web SDK for Stellar swaps against uswap-server — StellarBroker-first waterfall over StellarBroker, Soroswap, Aquarius and Stellar DEX, with client-native execution (signed-transaction + StellarBroker WebSocket session) and server-side tracking.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node test/run.mjs",
+    "demo:build": "npm run build && node demo/build.mjs",
+    "demo": "npm run demo:build && node demo/serve.mjs",
+    "clean": "rm -rf dist demo/app.bundle.js demo/app.bundle.js.map"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "stellar",
+    "swap",
+    "stellarbroker",
+    "soroswap",
+    "aquarius",
+    "uswap",
+    "defi"
+  ]
+}
