@@ -25,11 +25,18 @@ export interface StellarSwapConfig {
   requestTimeoutMs?: number
 }
 
+/** The fully-defaulted, internal shape every service consumes (all optionals resolved). */
 export interface ResolvedConfig extends Required<Omit<StellarSwapConfig, 'fetch' | 'WebSocket'>> {
   fetch: typeof fetch
   WebSocket: typeof WebSocket
 }
 
+/**
+ * Validate a user config and fill in defaults. Requires `apiBaseUrl` + `apiKey`; strips trailing
+ * slashes from URLs; binds the default global `fetch` to `globalThis` (an unbound `window.fetch`
+ * would throw "Illegal invocation" when called as a method); and defers the `WebSocket` check to
+ * session start, since only StellarBroker routes need it.
+ */
 export function resolveConfig(config: StellarSwapConfig): ResolvedConfig {
   if (!config.apiBaseUrl) throw new StellarSwapError('invalid_config', 'apiBaseUrl is required')
   if (!config.apiKey) throw new StellarSwapError('invalid_config', 'apiKey is required')

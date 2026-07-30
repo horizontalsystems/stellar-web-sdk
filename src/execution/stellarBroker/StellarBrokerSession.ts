@@ -352,6 +352,12 @@ class SessionRun {
   }
 
   private fail(error: StellarSwapError): void {
+    // Unwind any pending connect/quote gate. finish() clears that gate's own reject timer, so a
+    // failure arriving from an abort, a WebSocket error/close, the ceiling, or the silence
+    // watchdog during a gate wait would otherwise leave execute() awaiting forever. Rejecting the
+    // gate lets execute()'s catch run (finishFrom → fail again is idempotent once settled). No-op
+    // if no gate is pending (rejecting an already-settled promise does nothing).
+    this.rejectGate?.(error)
     this.finish(this.buildResult('failed', error))
   }
 

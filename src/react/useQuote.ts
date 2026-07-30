@@ -20,7 +20,8 @@ export interface UseQuoteResult {
 /**
  * Imperative quoting with request state. Only the most recent `quote()` call updates state — a
  * slow earlier request that resolves late is dropped, so rapid re-quoting (e.g. on amount change)
- * never flashes a stale price.
+ * never flashes a stale price. Starting a new `quote()` clears `error` but KEEPS the previous
+ * `data` until the new result lands (stale-while-revalidate); use `reset()` to clear it.
  */
 export function useQuote(): UseQuoteResult {
   const sdk = useStellarSwap()

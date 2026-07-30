@@ -7,6 +7,7 @@ import {
   xdr
 } from '@stellar/stellar-sdk'
 import { StellarSwapError } from './errors.js'
+import { isStellarAccountId } from './assets.js'
 
 /**
  * Key custody stays with the caller. The SDK never sees a secret key — it asks the signer to
@@ -102,7 +103,7 @@ export async function signAuthEntry(
 
 /** Assert `publicKey` is a well-formed Stellar account, throwing a typed error otherwise. */
 export function assertAccount(publicKey: string, label = 'address'): void {
-  if (!/^G[A-Z2-7]{55}$/.test(publicKey)) {
+  if (!isStellarAccountId(publicKey)) {
     throw new StellarSwapError('invalid_params', `Invalid Stellar ${label}: ${JSON.stringify(publicKey)}`)
   }
 }

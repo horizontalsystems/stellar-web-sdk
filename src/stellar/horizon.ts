@@ -43,6 +43,12 @@ export class HorizonClient {
     return this.submitXdr(xdr)
   }
 
+  /**
+   * Submit a base64 TransactionEnvelope to `POST /transactions`. Intentionally has NO client
+   * timeout — Horizon holds the request open until the tx is included in a ledger, so the outcome
+   * is known on return. CAVEAT: a Horizon 504 (or a dropped connection) surfaces as `submit_failed`,
+   * but the transaction MAY still have landed — reconcile by hash before assuming it didn't.
+   */
   async submitXdr(xdrBase64: string): Promise<HorizonSubmitResult> {
     const res = await this.fetch(`/transactions`, {
       method: 'POST',
@@ -58,8 +64,16 @@ export class HorizonClient {
         details: { title: body.title, detail: body.detail, result_codes: extras.result_codes, body }
       })
     }
+    const hash = String(body.hash ?? '')
+    if (!hash) {
+      // A 2xx with no hash can't be tracked — treat it as a failure rather than emit an empty hash.
+      throw new StellarSwapError('submit_failed', 'Horizon returned success with no transaction hash', {
+        status: res.status,
+        details: body
+      })
+    }
     return {
-      hash: String(body.hash ?? ''),
+      hash,
       successful: body.successful === true,
       ledger: typeof body.ledger === 'number' ? body.ledger : undefined,
       raw: body
@@ -68,7 +82,7 @@ export class HorizonClient {
 
   /** Fetch account state, or `null` if the account does not exist (404). */
   async getAccount(accountId: string): Promise<HorizonAccount | null> {
-    const res = await this.fetch(`/accounts/${accountId}`, { method: 'GET' })
+    const res = await this.fetch(`/accounts/${encodeURIComponent(accountId)}`, { method: 'GET' }, this.config.requestTimeoutMs)
     if (res.status === 404) return null
     const body = (await res.json().catch(() => ({}))) as HorizonAccount & Record<string, unknown>
     if (!res.ok) {
@@ -85,7 +99,7 @@ export class HorizonClient {
    * explicit `maxLedger`). Reads `GET /ledgers?order=desc&limit=1`.
    */
   async latestLedger(): Promise<number> {
-    const res = await this.fetch(`/ledgers?order=desc&limit=1`, { method: 'GET' })
+    const res = await this.fetch(`/ledgers?order=desc&limit=1`, { method: 'GET' }, this.config.requestTimeoutMs)
     const body = (await res.json().catch(() => ({}))) as {
       _embedded?: { records?: { sequence?: number }[] }
     }
@@ -96,14 +110,25 @@ export class HorizonClient {
     return seq
   }
 
-  private async fetch(path: string, init: RequestInit): Promise<Response> {
+  /**
+   * `fetch` wrapper. `timeoutMs` guards the reads (an unbounded Horizon read could hang forever);
+   * `submit` passes none on purpose, since it must stay open until ledger inclusion.
+   */
+  private async fetch(path: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
     const url = `${this.config.horizonUrl}${path}`
+    const controller = timeoutMs ? new AbortController() : undefined
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined
     try {
-      return await this.config.fetch(url, init)
+      return await this.config.fetch(url, controller ? { ...init, signal: controller.signal } : init)
     } catch (err) {
+      if (controller?.signal.aborted) {
+        throw new StellarSwapError('timeout', `Horizon request to ${path} timed out after ${timeoutMs}ms`, { cause: err })
+      }
       throw new StellarSwapError('server_error', `Horizon network error on ${path}: ${(err as Error).message}`, {
         cause: err
       })
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 }

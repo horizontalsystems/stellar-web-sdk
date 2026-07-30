@@ -24,6 +24,7 @@ export const STELLAR_CHAIN_ID = 'stellar'
 // Fees
 // ---------------------------------------------------------------------------
 
+/** Category of a fee line on a route. */
 export type FeeType = 'service' | 'liquidity' | 'inbound' | 'outbound' | 'affiliate'
 
 export interface Fee {
@@ -83,6 +84,7 @@ export type Execution = SignedTransactionExecution | StellarBrokerExecution
 // Routes (§3, §4)
 // ---------------------------------------------------------------------------
 
+/** Per-phase time estimate for a route, in seconds. */
 export interface EstimatedTime {
   inbound: number
   swap: number
@@ -91,6 +93,7 @@ export interface EstimatedTime {
   total: number
 }
 
+/** Quote accuracy metadata the server attaches to a route (informational). */
 export interface Accuracy {
   matched: number
   total: number
@@ -128,6 +131,7 @@ export interface CommittedRoute extends Route {
   uuid: string
 }
 
+/** A provider that couldn't serve the pair, with an optional min/max hint (as sent by the server). */
 export interface ProviderError {
   provider: string
   error: string
@@ -177,8 +181,10 @@ export type TrackStatus =
   | 'expired'
   | 'unknown'
 
-export const TERMINAL_STATUSES: TrackStatus[] = ['completed', 'refunded', 'failed', 'expired']
+/** Statuses at which tracking is final and polling should stop. */
+export const TERMINAL_STATUSES: readonly TrackStatus[] = ['completed', 'refunded', 'failed', 'expired']
 
+/** One leg (inbound / swap / outbound) of a tracked swap's progress. */
 export interface TrackLeg {
   chainId?: string
   hash?: string
@@ -192,6 +198,7 @@ export interface TrackLeg {
   toAddress?: string
 }
 
+/** Current tracking state for a committed swap (`POST /v2/track`). */
 export interface TrackResponse {
   status: TrackStatus
   providers: string[]
@@ -205,6 +212,7 @@ export interface TrackResponse {
   meta?: Record<string, unknown> & { pauseReason?: string; sellAmountUsd?: string }
 }
 
+/** Report the broadcast hash (first call) and/or poll status for a committed swap's `uuid`. */
 export interface TrackRequest {
   uuid: string
   inboundTxHash?: string
@@ -214,6 +222,7 @@ export interface TrackRequest {
 // Balances (§7) — used for trustline detection
 // ---------------------------------------------------------------------------
 
+/** One balance line from `/v2/balance` (used for trustline detection). */
 export interface BalanceEntry {
   identifier: string
   amount: string

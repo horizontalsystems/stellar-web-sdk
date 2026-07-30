@@ -19,6 +19,8 @@ export function toStellarSwapError(err: unknown): StellarSwapError {
 export function useMountedRef() {
   const mounted = useRef(true)
   useEffect(() => {
+    // Load-bearing despite the useRef(true) init: under React 18 StrictMode the effect is torn
+    // down and re-run, so the cleanup sets false and this restores it on remount.
     mounted.current = true
     return () => {
       mounted.current = false

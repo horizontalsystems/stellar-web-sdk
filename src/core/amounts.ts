@@ -4,6 +4,8 @@
  * puts on the wire matches exactly what the server truncates to.
  */
 
+import { StellarSwapError } from './errors.js'
+
 /** Every classic asset and native XLM has exactly 7 decimals on-chain. */
 export const STELLAR_DECIMALS = 7
 
@@ -21,7 +23,7 @@ export function normalizeStellarAmount(amount: string): string {
 export function toStroops(amount: string): bigint {
   const trimmed = amount.trim()
   if (!/^\d*(\.\d*)?$/.test(trimmed) || trimmed === '' || trimmed === '.') {
-    throw new Error(`Invalid Stellar amount: ${JSON.stringify(amount)}`)
+    throw new StellarSwapError('invalid_amount', `Invalid Stellar amount: ${JSON.stringify(amount)}`)
   }
   const dot = trimmed.indexOf('.')
   const int = dot >= 0 ? trimmed.slice(0, dot) : trimmed
@@ -40,16 +42,17 @@ export function fromStroops(stroops: bigint): string {
 }
 
 /**
- * Coerce a base-unit amount (`number | string`, from a Soroban i128 or an API field) to
- * stroops SAFELY. A JSON number above 2^53 has already lost precision; a string in
- * scientific notation would make `BigInt()` throw a 500. Both are rejected up front.
+ * Coerce an amount that is ALREADY in integer stroops (`number | string | bigint`, e.g. a Soroban
+ * i128 or an API field) to `bigint` SAFELY. This does NOT scale display units — use `toStroops` for
+ * decimal input. A JSON number above 2^53 has already lost precision; a string in scientific
+ * notation would make `BigInt()` throw. Both are rejected up front.
  */
 export function apiAmountToStroops(value: number | string | bigint): bigint {
   if (typeof value === 'bigint') return value
   if (typeof value === 'number') {
-    if (!Number.isSafeInteger(value)) throw new Error(`Unsafe numeric amount: ${value}`)
+    if (!Number.isSafeInteger(value)) throw new StellarSwapError('invalid_amount', `Unsafe numeric amount: ${value}`)
     return BigInt(value)
   }
-  if (!/^-?\d+$/.test(value)) throw new Error(`Non-integer amount: ${value}`)
+  if (!/^-?\d+$/.test(value)) throw new StellarSwapError('invalid_amount', `Non-integer amount: ${value}`)
   return BigInt(value)
 }

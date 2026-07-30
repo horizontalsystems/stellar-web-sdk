@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStellarSwap } from './context.js'
 import { toStellarSwapError, useMountedRef } from './internal.js'
 import type { CommitParams, ExecutionResult } from '../StellarSwapSDK.js'
@@ -53,6 +53,10 @@ export function useExecuteSwap(): UseExecuteSwapResult {
   const mounted = useMountedRef()
   const abortRef = useRef<AbortController>()
 
+  // Abort an in-flight swap (broker WebSocket session / track poll) if the component unmounts —
+  // the `mounted` guard only suppresses setState, it does not stop the underlying work.
+  useEffect(() => () => abortRef.current?.abort(), [])
+
   const [status, setStatus] = useState<SwapStatus>('idle')
   const [route, setRoute] = useState<CommittedRoute>()
   const [execution, setExecution] = useState<ExecutionResult>()
@@ -76,9 +80,13 @@ export function useExecuteSwap(): UseExecuteSwapResult {
       abortRef.current?.abort()
       abortRef.current = controller
 
+      // Clear ALL prior-run state so a second swap never shows the previous run's route/phase.
       set(setError, undefined)
+      set(setRoute, undefined)
+      set(setExecution, undefined)
       set(setTrackStatus, undefined)
       set(setBrokerQuote, undefined)
+      set(setBrokerPhase, undefined)
       set(setBrokerProgress, undefined)
       set(setStatus, 'committing')
 
@@ -91,9 +99,10 @@ export function useExecuteSwap(): UseExecuteSwapResult {
         const result = await sdk.execute(committed, signer, {
           signal: controller.signal,
           callbacks: {
-            onQuote: (q) => set(setBrokerQuote, q),
-            onPhase: (p) => set(setBrokerPhase, p),
-            onProgress: (pr) => set(setBrokerProgress, pr)
+            // Ignore late callbacks from a superseded/cancelled session (controller aborted).
+            onQuote: (q) => !controller.signal.aborted && set(setBrokerQuote, q),
+            onPhase: (p) => !controller.signal.aborted && set(setBrokerPhase, p),
+            onProgress: (pr) => !controller.signal.aborted && set(setBrokerProgress, pr)
           }
         })
         if (controller.signal.aborted) return undefined

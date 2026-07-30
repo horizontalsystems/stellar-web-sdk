@@ -4,8 +4,8 @@ import { UswapClient } from './client/UswapClient.js'
 import { TrustlineManager, TrustlineStatus } from './stellar/trustline.js'
 import { HorizonClient, HorizonSubmitResult } from './stellar/horizon.js'
 import { SignedTransactionExecutor, SignedTxPreview } from './execution/signedTransaction.js'
-import { StellarBrokerSession } from './execution/stellarBroker/StellarBrokerSession.js'
 import {
+  StellarBrokerSession,
   BrokerSessionCallbacks,
   BrokerSessionResult
 } from './execution/stellarBroker/StellarBrokerSession.js'
@@ -73,9 +73,13 @@ export interface ExecutionResult {
 }
 
 export interface PollOptions {
+  /** Delay between polls (ms). Default 60_000 — matches the server's tracking cadence. */
   intervalMs?: number
+  /** Give up after this long (ms) and return the last status. Default 1 hour. */
   timeoutMs?: number
+  /** Cancels the loop; a pending `delay` rejects with an `aborted` error. */
   signal?: AbortSignal
+  /** Called with every status read, including the terminal one. */
   onUpdate?: (status: TrackResponse) => void
 }
 
@@ -239,16 +243,23 @@ export class StellarSwapSDK {
   ): Promise<{ execution: ExecutionResult; track?: TrackResponse }> {
     const execution = await this.execute(route, signer, opts)
 
+    // Tracking is best-effort: a failed status call must NEVER discard a completed/partial
+    // execution (the hash lives on `execution.inboundTxHash` for a manual retry — guide §5).
     let track: TrackResponse | undefined
+    let trackError: unknown
     if (execution.inboundTxHash) {
-      track = await this.track(route.uuid, execution.inboundTxHash)
+      try {
+        track = await this.track(route.uuid, execution.inboundTxHash)
+      } catch (err) {
+        trackError = err
+      }
     }
 
     if (execution.brokerSession && execution.brokerSession.status === 'failed') {
       throw new StellarSwapError(
         execution.brokerSession.error?.code ?? 'broker_session_error',
         execution.brokerSession.error?.message ?? 'StellarBroker session failed',
-        { details: { track, signedHashes: execution.brokerSession.signedHashes } }
+        { details: { track, trackError, signedHashes: execution.brokerSession.signedHashes } }
       )
     }
     return { execution, track }
@@ -279,10 +290,16 @@ export class StellarSwapSDK {
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => {
+    let t: ReturnType<typeof setTimeout>
+    const onAbort = () => {
       clearTimeout(t)
       reject(new StellarSwapError('aborted', 'Aborted'))
-    })
+    }
+    t = setTimeout(() => {
+      // Detach so a long-lived polling signal doesn't accumulate one listener per interval.
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }

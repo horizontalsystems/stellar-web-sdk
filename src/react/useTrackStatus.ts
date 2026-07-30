@@ -25,8 +25,8 @@ export interface UseTrackStatusResult {
 
 /**
  * Poll `/v2/track` for a `uuid` until it reaches a terminal status (or times out). Re-polls when
- * `uuid` changes and stops cleanly on unmount. Pass the broadcast hash on first mount so the
- * server can bind it; subsequent polls only need the `uuid`.
+ * `uuid` or `inboundTxHash` changes, and stops cleanly on unmount or when `enabled` flips false.
+ * Pass the broadcast hash on first mount so the server can bind it; later polls only need the `uuid`.
  */
 export function useTrackStatus(
   uuid: string | undefined,
@@ -40,7 +40,12 @@ export function useTrackStatus(
   const [isPolling, setIsPolling] = useState(false)
 
   useEffect(() => {
-    if (!uuid || !enabled) return
+    if (!uuid || !enabled) {
+      // Nothing to poll — make sure a previously-true isPolling doesn't stick (the aborted
+      // promise's .then/.catch never run, so reset here).
+      setIsPolling(false)
+      return
+    }
     const controller = new AbortController()
     setError(undefined)
     setIsPolling(true)
