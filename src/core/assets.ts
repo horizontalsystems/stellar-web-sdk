@@ -90,6 +90,18 @@ export function parseStellarAssetIdentifier(raw: string): StellarAsset {
   return { code, issuer, identifier: `XLM.${code}-${issuer}` }
 }
 
+/**
+ * Like {@link parseStellarAssetIdentifier} but returns `undefined` instead of throwing. Use it to
+ * tell a Stellar asset from a cross-chain `CHAIN.TICKER-ADDRESS` identifier without a try/catch.
+ */
+export function tryParseStellarAssetIdentifier(raw: string): StellarAsset | undefined {
+  try {
+    return parseStellarAssetIdentifier(raw)
+  } catch {
+    return undefined
+  }
+}
+
 /** `true` for native XLM. */
 export function isNativeAsset(asset: StellarAsset): boolean {
   return isNativeCode(asset.code) && !asset.issuer

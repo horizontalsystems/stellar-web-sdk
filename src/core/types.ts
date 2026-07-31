@@ -17,6 +17,15 @@ export type StellarProvider = (typeof STELLAR_PROVIDERS)[number]
 /** Providers that can settle to a destination ≠ source (see guide §3, §6). */
 export const RECIPIENT_CAPABLE_PROVIDERS = ['SOROSWAP', 'STELLAR_DEX'] as const
 
+/** Cross-chain (`transfer` / deposit-to-address) providers the unified quote also fans out to. */
+export const CROSS_CHAIN_PROVIDERS = ['NEAR'] as const
+
+/** Axelar ITS — same-token cross-chain bridge (Stellar ↔ Ethereum) via a signed Stellar tx. */
+export const AXELAR_PROVIDERS = ['AXELAR_ITS'] as const
+
+/** Tokens the AXELAR_ITS provider bridges today (Stellar ↔ Ethereum, same token). */
+export const AXELAR_ITS_TICKERS = ['XLM', 'SHX'] as const
+
 /** Stellar chain id / prefix used across the contract. */
 export const STELLAR_CHAIN_ID = 'stellar'
 
@@ -78,7 +87,32 @@ export interface StellarBrokerExecution {
   partnerKey?: string
 }
 
-export type Execution = SignedTransactionExecution | StellarBrokerExecution
+/**
+ * `transfer` execution for cross-chain providers (e.g. NEAR / 1Click). There is no envelope to
+ * sign: the trader sends `amount` of `asset` (with the memo/tag in `attachment`) to `depositAddress`
+ * on the origin `chain`, and the provider fills the destination side. For some origin chains the
+ * server can hand back a prebuilt `unsignedTx`; when it can't, `unsignedTxUnavailable` says why and
+ * the client builds the deposit itself.
+ */
+export interface TransferExecution {
+  method: 'transfer'
+  /** Origin chain code the deposit is made on (e.g. `XLM`, `ETH`, `BTC`). */
+  chain: string
+  /** Address to send the origin funds to. */
+  depositAddress: string
+  /** Exact amount to deposit, in whole units (decimal string) of `asset`. */
+  amount: string
+  /** Origin asset identifier (`CHAIN.TICKER-ADDRESS`). */
+  asset: string
+  /** Memo / destination tag required by the deposit, if any (Stellar memo, XRP tag, …). */
+  attachment?: { type: string; value: string }
+  /** Base64/hex unsigned deposit tx the client may sign, when the server could build one. */
+  unsignedTx?: string
+  /** Present instead of `unsignedTx` when the server couldn't prebuild one (e.g. `chain_not_supported`). */
+  unsignedTxUnavailable?: string
+}
+
+export type Execution = SignedTransactionExecution | StellarBrokerExecution | TransferExecution
 
 // ---------------------------------------------------------------------------
 // Routes (§3, §4)
@@ -119,6 +153,8 @@ export interface Route {
   accuracy?: Accuracy
   amlErrors?: { message: string; level: number }[]
   meta?: Record<string, unknown>
+  /** Unix ms after which a cross-chain quote's price/deposit is stale (cross-chain routes). */
+  expiresAt?: number
   /** Present only on committed (`/v2/swap`) routes. */
   execution?: Execution
   /** Tracking handle — present only on committed routes. Store it. */
@@ -164,6 +200,28 @@ export interface SwapRequest extends RateRequest {
   provider: string
   sourceAddress: string
   destinationAddress: string
+  /** Where refunds go if the swap can't complete. REQUIRED by cross-chain (`transfer`) providers. */
+  refundAddress?: string
+}
+
+/**
+ * A token from `GET /v2/tokens?provider=…` — the cross-chain asset catalog. Never hand-construct
+ * `identifier`s; use these. `decimals` varies per token (unlike Stellar's fixed 7).
+ */
+export interface TokenInfo {
+  /** Canonical `CHAIN.TICKER-ADDRESS` identifier to pass as sell/buy asset. */
+  identifier: string
+  chain: string
+  chainId: string
+  decimals: number
+  ticker: string
+  name?: string
+  address?: string
+  logoURI?: string
+  coingeckoId?: string | null
+  /** Provider-native id, e.g. NEAR's `nep141:…` / `nep245:…`. */
+  extensions?: { providerId?: string } & Record<string, unknown>
+  [k: string]: unknown
 }
 
 // ---------------------------------------------------------------------------

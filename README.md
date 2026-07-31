@@ -1,7 +1,8 @@
 # stellar-web-sdk
 
-Web SDK for Stellar swaps against **uswap-server**. It aggregates the four Stellar-native swap
-sources behind one API and runs execution **client-side**:
+Web SDK for Stellar swaps against **uswap-server**. It aggregates six swap sources — four
+Stellar-native providers plus **NEAR** and **Axelar ITS** for cross-chain routes — behind one API
+and runs execution **client-side**:
 
 | Provider | Execution | `minBuyAmount` | Third-party recipient |
 |---|---|---|---|
@@ -9,6 +10,8 @@ sources behind one API and runs execution **client-side**:
 | **SOROSWAP** | signed transaction | enforced | yes |
 | **AQUARIUS** | signed transaction | enforced | no |
 | **STELLAR_DEX** | signed transaction | enforced | yes |
+| **NEAR** (cross-chain) | deposit to address | enforced | yes |
+| **AXELAR_ITS** (cross-chain) | signed transaction | enforced (1:1 bridge) | yes |
 
 The SDK implements the **StellarBroker-first waterfall**. Pricing, committing, and tracking go
 through uswap-server (`/v2/rate`, `/v2/swap`, `/v2/track`), but **execution is client-side and does
@@ -172,6 +175,51 @@ If `destinationAddress` differs from `sourceAddress`, the fan-out is automatical
 recipient-capable providers (`SOROSWAP`, `STELLAR_DEX`) — SB and AQUARIUS settle on the trader's own
 account.
 
+## Unified routing (Stellar in-chain + cross-chain NEAR)
+
+`quote()`/`commit()`/`execute()` handle every path in one flow, routed **automatically from the
+assets**:
+
+- **Stellar-native** pair (both assets Stellar) → the four Stellar in-chain providers (SB-first waterfall).
+- **Axelar ITS** pair — the same token bridged Stellar ↔ Ethereum (`XLM.XLM`↔`ETH.XLM-0x…`, `SHX`↔`SHX`)
+  → the **AXELAR_ITS** provider (a signed Stellar tx, so the normal `execute()` signs & submits it).
+- any other **cross-chain** pair → the **NEAR** provider (1Click), deposit-to-address.
+
+You don't choose up front — read `QuoteResult.crossChain`. Cross-chain assets are `CHAIN.TICKER-ADDRESS`
+identifiers from each provider's catalog (`crossChainTokens('NEAR' | 'AXELAR_ITS')`).
+
+```ts
+// (optional) discover cross-chain assets — never hand-build identifiers.
+const tokens = await sdk.crossChainTokens('NEAR')   // [{ identifier: 'ETH.ETH', decimals: 18, … }]
+
+// 1) One quote — auto-routes. `sellAsset`/`buyAsset` are Stellar (XLM.XLM) or cross-chain (ETH.USDC-0x…).
+const q = await sdk.quote({
+  sellAsset: 'XLM.XLM',
+  buyAsset: 'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48', // cross-chain here → NEAR
+  sellAmount: '500',
+  slippage: 1,                        // PERCENT
+  sourceAddress: 'GTRADER…',
+  destinationAddress: '0x…',          // destination-chain address (cross-chain / third-party)
+})
+q.crossChain   // true → routed via NEAR; false → Stellar in-chain
+
+// 2) Commit the picked provider (refundAddress defaults to sourceAddress for cross-chain).
+const route = await sdk.commit({ ...quoteParams, provider: q.provider! })
+
+// 3) Execute — dispatches on execution.method. Stellar origin + signer signs & submits the deposit;
+//    any other origin returns the deposit instruction to send yourself.
+const exec = await sdk.execute(route, signer)
+if (exec.method === 'transfer' && !exec.submitted) {
+  // exec.deposit = { chain, depositAddress, amount, asset, attachment: { type, value } }
+  // send it from your wallet, then sdk.track(route.uuid, hash)
+} else {
+  await sdk.track(route.uuid, exec.inboundTxHash)   // then pollTrack to completion
+}
+```
+
+Cross-chain routes carry `execution.method === 'transfer'` (see `TransferExecution`). `crossChainTokens()`
+lists cross-chain assets and `depositFor(route)` returns the deposit without submitting.
+
 ## Signing — the `StellarSigner` interface
 
 Key custody stays with the caller. The SDK only ever asks for a **raw ed25519 signature over
@@ -217,17 +265,20 @@ before rethrowing.
 
 - `new StellarSwapSDK(config)` — `apiBaseUrl`, `apiKey`, optional `horizonUrl`, `networkPassphrase`,
   `brokerWsUrl`, `fetch`, `WebSocket`, `requestTimeoutMs`.
-- `quote(params)` → `{ route?, provider?, allRoutes, providerErrors }`
+- `quote(params)` → `{ route?, provider?, crossChain, allRoutes, providerErrors }`
+- `crossChainTokens(provider?)` → the cross-chain asset catalog (`'NEAR'` default, or `'AXELAR_ITS'`)
 - `checkTrustline(recipient, buyAsset)` / `activateTrustline(signer, asset, limit?)`
 - `commit(params)` → `CommittedRoute` (has `execution` + `uuid`)
 - `previewSignedTransaction(route)` → fee + enforced minimum for a confirm screen
-- `execute(route, signer, opts?)` → `ExecutionResult`
+- `execute(route, signer?, opts?)` → `ExecutionResult` (signer optional only for a non-Stellar-origin
+  cross-chain route, which returns `result.deposit` instead of submitting)
+- `depositFor(route)` → the cross-chain deposit instruction without submitting
 - `executeAndTrack(route, signer, opts?)` → `{ execution, track? }`
 - `track(uuid, inboundTxHash?)` / `pollTrack(uuid, inboundTxHash, opts?)`
 
 Advanced building blocks are also exported: `UswapClient`, `TrustlineManager`, `HorizonClient`,
-`SignedTransactionExecutor`, `StellarBrokerSession`, `SigningPipeline`, the waterfall helpers, and
-all asset/amount utilities.
+`SignedTransactionExecutor`, `TransferExecutor`, `StellarBrokerSession`, `SigningPipeline`, the
+waterfall helpers, and all asset/amount utilities.
 
 ## Gotchas honored by this SDK
 

@@ -9,18 +9,24 @@
   <body>
     <h1>Stellar swap</h1>
     <p class="lead">
-      Vanilla JS on the core <code>StellarSwapSDK</code>. <b>Mainnet only</b> — a swap moves real
-      funds. Use a dedicated, low-balance account; the secret key stays in your browser.
+      Vanilla JS on the core <code>StellarSwapSDK</code>. One quote routes automatically: Stellar
+      in-chain when it can serve the pair, else cross-chain. <b>Mainnet only</b> — use a
+      dedicated, low-balance account; the secret key stays in your browser.
     </p>
 
     <fieldset>
       <label>API base URL <input id="apiBaseUrl" value="https://swap-dev.unstoppable.money/api" /></label>
       <label>API key (X-API-Key) <input id="apiKey" type="password" placeholder="your SDK key" /></label>
       <label>Sell asset <input id="sellAsset" value="XLM.XLM" /></label>
-      <label>Buy asset <input id="buyAsset" value="XLM.USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" /></label>
+      <label>Buy asset (try <code>ETH.USDC-0X…</code> for a cross-chain route)
+        <input id="buyAsset" value="XLM.USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" /></label>
       <label>Sell amount <input id="sellAmount" value="10" /></label>
       <label>Slippage (%) <input id="slippage" value="1" /></label>
-      <label>Secret key (S…) — dedicated account only <input id="secretKey" type="password" placeholder="S… (kept client-side)" /></label>
+      <label>Secret key (S…) — signs a Stellar-origin swap/deposit <input id="secretKey" type="password" placeholder="S… (kept client-side)" /></label>
+      <label>Destination address (optional) — cross-chain or third-party; defaults to your account
+        <input id="destination" placeholder="0x… / bc1… / G…" /></label>
+      <label>Source address (optional) — only for a non-Stellar origin with no secret key
+        <input id="source" placeholder="origin-chain address" /></label>
     </fieldset>
 
     <div class="row">

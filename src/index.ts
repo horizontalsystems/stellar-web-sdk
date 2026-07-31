@@ -71,6 +71,8 @@ export { HorizonClient, accountHoldsTrustline } from './stellar/horizon.js'
 export type { HorizonAccount, HorizonBalance, HorizonSubmitResult } from './stellar/horizon.js'
 export { SignedTransactionExecutor } from './execution/signedTransaction.js'
 export type { SignedTxPreview } from './execution/signedTransaction.js'
+export { TransferExecutor } from './execution/transfer.js'
+export type { TransferResult, DepositInstruction } from './execution/transfer.js'
 export { StellarBrokerSession } from './execution/stellarBroker/StellarBrokerSession.js'
 export type {
   BrokerSessionCallbacks,
@@ -88,6 +90,8 @@ export type {
   Execution,
   SignedTransactionExecution,
   StellarBrokerExecution,
+  TransferExecution,
+  TokenInfo,
   StellarSignedTx,
   Fee,
   FeeType,

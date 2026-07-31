@@ -26,6 +26,17 @@ export function selectRoute(routes: Route[]): Route | undefined {
   return bestByExpected(routes)
 }
 
+/**
+ * Unified selection across Stellar in-chain and cross-chain (`transfer`) routes: PREFER a Stellar
+ * in-chain route (SB-first waterfall) whenever one exists, and only fall back to the best
+ * cross-chain route when Stellar can't serve the pair. This is the "in-chain if possible, else NEAR"
+ * policy — Stellar always wins for a Stellar-native pair, regardless of the cross-chain quote.
+ */
+export function selectUnifiedRoute(routes: Route[]): Route | undefined {
+  const stellar = routes.filter((r) => (STELLAR_PROVIDERS as readonly string[]).includes(routeProvider(r) ?? ''))
+  return stellar.length ? selectRoute(stellar) : bestByExpected(routes)
+}
+
 /** The route with the greatest `expectedBuyAmount` (decimal-string safe compare). */
 export function bestByExpected(routes: Route[]): Route | undefined {
   let best: Route | undefined

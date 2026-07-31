@@ -7,7 +7,10 @@ import type { StellarSwapError } from 'stellar-web-sdk'
 import { Note } from './Note'
 import { USDC, XLM } from '../lib/assets'
 
-/** The swap panel — assumes it is rendered inside a <StellarSwapProvider>. */
+/**
+ * Unified swap panel: one quote() auto-routes Stellar in-chain vs cross-chain (NEAR), and Swap
+ * dispatches accordingly. Cross-chain routes may return a deposit instruction instead of submitting.
+ */
 export function Swap() {
   const sdk = useStellarSwap()
   const [sellAsset, setSellAsset] = useState(XLM)
@@ -15,6 +18,8 @@ export function Swap() {
   const [sellAmount, setSellAmount] = useState('10')
   const [slippage, setSlippage] = useState('1')
   const [secretKey, setSecretKey] = useState('')
+  const [destination, setDestination] = useState('')
+  const [sourceField, setSourceField] = useState('')
 
   const signer = useMemo(() => {
     if (!secretKey.startsWith('S')) return undefined
@@ -25,17 +30,18 @@ export function Swap() {
     }
   }, [secretKey])
 
+  const sourceAddress = signer?.publicKey || sourceField.trim()
+
   const q = useQuote()
   const swap = useExecuteSwap()
 
-  // Trustline gate: buying a classic asset the trader doesn't hold a trustline for fails on-chain.
   const [trustRequired, setTrustRequired] = useState<boolean | undefined>()
   const [trustBusy, setTrustBusy] = useState(false)
   const [trustError, setTrustError] = useState<StellarSwapError>()
+  const [confirming, setConfirming] = useState(false)
 
-  // Poll the committed order to a terminal status (useExecuteSwap only reads it once).
   const track = useTrackStatus(swap.route?.uuid, swap.execution?.inboundTxHash, {
-    enabled: !!swap.route?.uuid,
+    enabled: !!swap.execution?.inboundTxHash,
     intervalMs: 5_000
   })
 
@@ -44,17 +50,18 @@ export function Swap() {
     buyAsset,
     sellAmount,
     slippage: Number(slippage),
-    sourceAddress: signer?.publicKey
+    sourceAddress: sourceAddress || undefined,
+    destinationAddress: destination.trim() || undefined
   }
 
   async function onQuote() {
     setTrustRequired(undefined)
     setTrustError(undefined)
     const res = await q.quote(baseParams)
-    if (res?.route && signer) {
+    // Trustline gate applies only to Stellar in-chain routes.
+    if (res && !res.crossChain && res.route && signer) {
       try {
-        const status = await sdk.checkTrustline(signer.publicKey, buyAsset)
-        setTrustRequired(status.required)
+        setTrustRequired((await sdk.checkTrustline(signer.publicKey, buyAsset)).required)
       } catch (err) {
         setTrustError(err as StellarSwapError)
       }
@@ -75,19 +82,36 @@ export function Swap() {
     }
   }
 
-  const canSwap = !!signer && !!q.data?.provider && !swap.isLoading && trustRequired !== true
+  const crossChain = q.data?.crossChain
+  const canSwap =
+    !!q.data?.provider &&
+    !swap.isLoading &&
+    (crossChain ? !!sourceAddress && !!destination.trim() : !!signer && trustRequired !== true)
+
+  // Signing occurs for in-chain routes and Stellar-origin cross-chain deposits.
+  const willSign = !!signer && (!crossChain || /^(native|XLM)$/.test(sellAsset) || sellAsset.startsWith('XLM.'))
+
+  function doSwap() {
+    setConfirming(false)
+    swap.swap({ ...baseParams, sourceAddress, provider: q.data!.provider!, signer })
+  }
+
+  const deposit = swap.execution?.method === 'transfer' && !swap.execution.submitted ? swap.execution.deposit : undefined
 
   return (
     <>
       <fieldset>
         <label>Sell asset<input value={sellAsset} onChange={(e) => setSellAsset(e.target.value)} /></label>
-        <label>Buy asset<input value={buyAsset} onChange={(e) => setBuyAsset(e.target.value)} /></label>
+        <label>Buy asset (try <code>ETH.USDC-0X…</code> for cross-chain)
+          <input value={buyAsset} onChange={(e) => setBuyAsset(e.target.value)} /></label>
         <label>Sell amount<input value={sellAmount} onChange={(e) => setSellAmount(e.target.value)} /></label>
         <label>Slippage (%)<input value={slippage} onChange={(e) => setSlippage(e.target.value)} /></label>
-        <label>
-          Secret key (S…) — dedicated account only
-          <input type="password" placeholder="S… (kept client-side)" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} />
-        </label>
+        <label>Secret key (S…) — signs a Stellar-origin swap/deposit
+          <input type="password" placeholder="S… (kept client-side)" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} /></label>
+        <label>Destination address (optional) — cross-chain or third-party
+          <input placeholder="0x… / bc1… / G…" value={destination} onChange={(e) => setDestination(e.target.value)} /></label>
+        <label>Source address (optional) — non-Stellar origin with no secret key
+          <input placeholder="origin-chain address" value={sourceField} onChange={(e) => setSourceField(e.target.value)} /></label>
         {signer && <small className="source">Source: {signer.publicKey}</small>}
       </fieldset>
 
@@ -96,23 +120,31 @@ export function Swap() {
         {trustRequired && (
           <button disabled={trustBusy} onClick={onActivateTrustline}>{trustBusy ? 'Activating…' : 'Activate trustline'}</button>
         )}
-        <button
-          disabled={!canSwap}
-          onClick={() =>
-            swap.swap({ ...baseParams, sourceAddress: signer!.publicKey, provider: q.data!.provider!, signer: signer! })
-          }
-        >
+        <button disabled={!canSwap || confirming} onClick={() => setConfirming(true)}>
           {swap.isLoading ? `${swap.status}…` : 'Swap'}
         </button>
         {swap.isLoading && <button onClick={() => swap.cancel()}>Cancel</button>}
       </div>
 
+      {confirming && q.data?.route && (
+        <div className="note info">
+          <b>Confirm swap</b> — <b>mainnet, real funds</b>
+          <br />
+          Sell {sellAmount} {sellAsset} → ≈ {q.data.route.expectedBuyAmount} {buyAsset}
+          <br />
+          via <b>{q.data.provider}</b> {crossChain ? '(cross-chain)' : '(Stellar in-chain)'}
+          <div className="row" style={{ marginTop: 8 }}>
+            <button onClick={doSwap}>{willSign ? 'Confirm & sign' : 'Confirm'}</button>
+            <button onClick={() => setConfirming(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       {q.error && <Note kind="error">Quote failed: {q.error.code} — {q.error.message}</Note>}
-      {q.data && (
+      {q.data?.provider && (
         <Note kind="info">
-          Best provider: <b>{q.data.provider ?? 'none'}</b>
+          Best provider: <b>{q.data.provider}</b> {crossChain ? '(cross-chain)' : '(Stellar in-chain)'}
           {q.data.route && <> · buy amount ≈ {q.data.route.expectedBuyAmount}</>}
-          {q.data.providerErrors.length > 0 && <> · {q.data.providerErrors.length} provider(s) couldn’t serve the pair</>}
         </Note>
       )}
       {trustRequired === true && (
@@ -124,10 +156,16 @@ export function Swap() {
         <Note kind="info">
           Broker phase: <b>{swap.brokerPhase}</b>
           {swap.brokerQuote?.estimatedBuyingAmount && <> · live buy ≈ {swap.brokerQuote.estimatedBuyingAmount}</>}
-          {swap.brokerProgress?.bought && <> · bought {swap.brokerProgress.bought}</>}
         </Note>
       )}
-      {swap.status === 'success' && (
+      {deposit && (
+        <Note kind="ok">
+          Committed <code>{swap.route?.uuid}</code>. Send <b>{deposit.amount} {deposit.asset}</b> on <b>{deposit.chain}</b> to{' '}
+          <b>{deposit.depositAddress}</b>
+          {deposit.attachment && <> · memo ({deposit.attachment.type}) <b>{deposit.attachment.value}</b></>}, then track by uuid.
+        </Note>
+      )}
+      {swap.execution?.submitted !== false && swap.status === 'success' && (
         <Note kind="ok">
           Submitted via {swap.execution?.method}. Tracking hash: {swap.execution?.inboundTxHash ?? '—'}
           {track.status && <> · status <b>{track.status.status}</b></>}

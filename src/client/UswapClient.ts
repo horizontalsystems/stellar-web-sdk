@@ -7,6 +7,7 @@ import {
   RateResponse,
   Route,
   SwapRequest,
+  TokenInfo,
   TrackRequest,
   TrackResponse
 } from '../core/types.js'
@@ -54,6 +55,18 @@ export class UswapClient {
     const body = await this.get<BalanceEntry[] | { balances: BalanceEntry[] }>(`/v2/balance?${params.toString()}`)
     // The endpoint may return a bare array or a `{ balances }` envelope depending on version.
     return Array.isArray(body) ? body : (body.balances ?? [])
+  }
+
+  /**
+   * `GET /v2/tokens?provider=…` — the provider's cross-chain asset catalog. Required for NEAR:
+   * use the returned `identifier`s as sell/buy assets (never hand-build them). Returns a bare
+   * array or a `{ tokens }` envelope depending on version.
+   */
+  async tokens(provider: string): Promise<TokenInfo[]> {
+    const body = await this.get<TokenInfo[] | { tokens: TokenInfo[] }>(
+      `/v2/tokens?provider=${encodeURIComponent(provider)}`
+    )
+    return Array.isArray(body) ? body : (body.tokens ?? [])
   }
 
   /** `GET /v2/providers` — provider metadata (executionType, suspended, contacts, …). */

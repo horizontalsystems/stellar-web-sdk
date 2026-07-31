@@ -4,23 +4,67 @@ import { UswapClient } from './client/UswapClient.js'
 import { TrustlineManager, TrustlineStatus } from './stellar/trustline.js'
 import { HorizonClient, HorizonSubmitResult } from './stellar/horizon.js'
 import { SignedTransactionExecutor, SignedTxPreview } from './execution/signedTransaction.js'
+import { TransferExecutor, DepositInstruction } from './execution/transfer.js'
 import {
   StellarBrokerSession,
   BrokerSessionCallbacks,
   BrokerSessionResult
 } from './execution/stellarBroker/StellarBrokerSession.js'
-import { parseBrokerAsset, parseStellarAssetIdentifier } from './core/assets.js'
+import { parseBrokerAsset, parseStellarAssetIdentifier, tryParseStellarAssetIdentifier } from './core/assets.js'
 import { StellarSigner, assertAccount } from './core/signer.js'
-import { isThirdPartyRecipient, providersForRecipient, routeProvider, selectRoute } from './core/waterfall.js'
+import { isThirdPartyRecipient, providersForRecipient, routeProvider, selectUnifiedRoute } from './core/waterfall.js'
 import {
+  AXELAR_ITS_TICKERS,
+  AXELAR_PROVIDERS,
   CommittedRoute,
+  CROSS_CHAIN_PROVIDERS,
   ProviderError,
   Route,
   STELLAR_CHAIN_ID,
+  STELLAR_PROVIDERS,
   TERMINAL_STATUSES,
+  TokenInfo,
   TrackResponse
 } from './core/types.js'
 import { normalizeStellarAmount } from './core/amounts.js'
+
+/** True when `provider` is a Stellar in-chain provider (vs a cross-chain `transfer` provider). */
+function isStellarProvider(provider: string): boolean {
+  return (STELLAR_PROVIDERS as readonly string[]).includes(provider)
+}
+
+/**
+ * A pair is cross-chain unless BOTH assets are Stellar-native identifiers. Determines the routing
+ * automatically: Stellar-native pairs go to the Stellar providers, everything else to NEAR.
+ */
+function isCrossChainPair(sellAsset: string, buyAsset: string): boolean {
+  return !(tryParseStellarAssetIdentifier(sellAsset) && tryParseStellarAssetIdentifier(buyAsset))
+}
+
+/** Split a `CHAIN.TICKER[-ADDRESS]` identifier into its chain code and ticker. */
+function chainAndTicker(id: string): { chain: string; ticker: string } | undefined {
+  const s = id.trim()
+  const dot = s.indexOf('.')
+  if (dot <= 0) return undefined
+  const rest = s.slice(dot + 1)
+  const dash = rest.indexOf('-')
+  const ticker = dash >= 0 ? rest.slice(0, dash) : rest
+  return ticker ? { chain: s.slice(0, dot), ticker } : undefined
+}
+
+/**
+ * An Axelar ITS pair is a **same-token** bridge between Stellar (`XLM.…`) and Ethereum (`ETH.…`)
+ * for a token AXELAR_ITS supports (XLM, SHX today) — routed via the AXELAR_ITS provider. Checked
+ * before the generic cross-chain (NEAR) fallback.
+ */
+function isAxelarPair(sellAsset: string, buyAsset: string): boolean {
+  const a = chainAndTicker(sellAsset)
+  const b = chainAndTicker(buyAsset)
+  if (!a || !b || a.ticker !== b.ticker) return false
+  if (!(AXELAR_ITS_TICKERS as readonly string[]).includes(a.ticker)) return false
+  const chains = new Set([a.chain, b.chain])
+  return chains.size === 2 && chains.has('XLM') && chains.has('ETH')
+}
 
 export interface QuoteParams {
   sellAsset: string
@@ -38,10 +82,12 @@ export interface QuoteParams {
 }
 
 export interface QuoteResult {
-  /** The route the waterfall picked (SB-first). `undefined` when nothing routed. */
+  /** The route the unified policy picked (Stellar in-chain preferred, else cross-chain). */
   route?: Route
-  /** The provider the waterfall picked. */
+  /** The provider the policy picked. */
   provider?: string
+  /** True when the pick is a cross-chain (`transfer`) provider rather than Stellar in-chain. */
+  crossChain: boolean
   /** Every route the server returned, for display/debug. */
   allRoutes: Route[]
   /** Providers that couldn't serve the pair. */
@@ -52,8 +98,10 @@ export interface CommitParams extends QuoteParams {
   sourceAddress: string
   /** The provider to commit to — normally `QuoteResult.provider`. */
   provider: string
-  /** Defaults to `sourceAddress`. */
+  /** Defaults to `sourceAddress`. For cross-chain, the destination-chain address. */
   destinationAddress?: string
+  /** Cross-chain only: where refunds go if the swap can't complete. Defaults to `sourceAddress`. */
+  refundAddress?: string
 }
 
 export interface ExecuteOptions {
@@ -63,13 +111,17 @@ export interface ExecuteOptions {
 }
 
 export interface ExecutionResult {
-  method: 'signed_transaction' | 'stellar_broker'
-  /** The hash to report to `/v2/track`. May be undefined if a broker session signed nothing. */
+  method: 'signed_transaction' | 'stellar_broker' | 'transfer'
+  /** The hash to report to `/v2/track`. Undefined if a broker session signed nothing, or a cross-chain deposit wasn't submitted by the SDK. */
   inboundTxHash?: string
-  /** Present for `signed_transaction` routes. */
+  /** Present for `signed_transaction` routes and submitted Stellar-origin `transfer` deposits. */
   submit?: HorizonSubmitResult
   /** Present for `stellar_broker` routes (includes partial-failure tracking data). */
   brokerSession?: BrokerSessionResult
+  /** Present for `transfer` routes — what to deposit (always), so a non-submitting caller can send it. */
+  deposit?: DepositInstruction
+  /** `transfer` routes: whether the SDK built + submitted the deposit (Stellar origin + signer). */
+  submitted?: boolean
 }
 
 export interface PollOptions {
@@ -103,6 +155,7 @@ export class StellarSwapSDK {
   readonly horizon: HorizonClient
   private readonly signedTx: SignedTransactionExecutor
   private readonly broker: StellarBrokerSession
+  private readonly transfer: TransferExecutor
 
   constructor(config: StellarSwapConfig) {
     this.config = resolveConfig(config)
@@ -111,39 +164,61 @@ export class StellarSwapSDK {
     this.horizon = new HorizonClient(this.config)
     this.signedTx = new SignedTransactionExecutor(this.config)
     this.broker = new StellarBrokerSession(this.config)
+    this.transfer = new TransferExecutor(this.config)
   }
 
   /**
-   * Price the swap across the Stellar providers and apply the waterfall. Validates assets and
-   * restricts the provider set when a third-party recipient is involved (SB/AQUARIUS can't pay a
-   * different destination).
+   * Price the swap, choosing the provider set automatically from the assets:
+   *   - **Stellar-native** pair (both assets Stellar) → the four Stellar providers (SB-first
+   *     waterfall, with the recipient-capable subset for a third-party recipient).
+   *   - **Axelar ITS** pair (same token bridged Stellar ↔ Ethereum, e.g. `XLM.XLM`↔`ETH.XLM-0x…`)
+   *     → the `AXELAR_ITS` provider.
+   *   - any other **cross-chain** pair → NEAR only.
+   * The caller needn't know the path — check `QuoteResult.crossChain`. Pass `providers` to override.
    */
   async quote(params: QuoteParams): Promise<QuoteResult> {
-    const sell = parseStellarAssetIdentifier(params.sellAsset)
-    const buy = parseStellarAssetIdentifier(params.buyAsset)
-    if (params.sourceAddress) assertAccount(params.sourceAddress, 'sourceAddress')
-    if (params.destinationAddress) assertAccount(params.destinationAddress, 'destinationAddress')
-
+    const axelar = isAxelarPair(params.sellAsset, params.buyAsset)
+    const crossChain = axelar || isCrossChainPair(params.sellAsset, params.buyAsset)
     const thirdParty =
-      !!params.sourceAddress && isThirdPartyRecipient(params.sourceAddress, params.destinationAddress)
-    const providers = params.providers ?? providersForRecipient(thirdParty)
+      !crossChain && !!params.sourceAddress && isThirdPartyRecipient(params.sourceAddress, params.destinationAddress)
+    const providers =
+      params.providers ??
+      (axelar
+        ? [...AXELAR_PROVIDERS]
+        : crossChain
+          ? [...CROSS_CHAIN_PROVIDERS]
+          : providersForRecipient(thirdParty))
 
     const res = await this.client.rate({
-      chainId: STELLAR_CHAIN_ID,
-      sellAsset: sell.identifier,
-      buyAsset: buy.identifier,
-      sellAmount: normalizeStellarAmount(params.sellAmount),
+      // Stellar-native pairs keep the original `chainId: stellar` request; cross-chain assets
+      // encode their own chains, so none is sent.
+      ...(crossChain ? {} : { chainId: STELLAR_CHAIN_ID }),
+      sellAsset: this.normalizeAssetId(params.sellAsset),
+      buyAsset: this.normalizeAssetId(params.buyAsset),
+      sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
       slippage: params.slippage,
       providers
     })
 
-    const route = selectRoute(res.routes ?? [])
+    const routes = res.routes ?? []
+    const route = selectUnifiedRoute(routes)
     return {
       route,
       provider: route ? routeProvider(route) : undefined,
-      allRoutes: res.routes ?? [],
+      crossChain,
+      allRoutes: routes,
       providerErrors: res.providerErrors ?? []
     }
+  }
+
+  /** Normalize a Stellar asset id to canonical form; pass a cross-chain identifier through as-is. */
+  private normalizeAssetId(raw: string): string {
+    return tryParseStellarAssetIdentifier(raw)?.identifier ?? raw.trim()
+  }
+
+  /** Truncate to Stellar's 7-dp grid for Stellar sell assets; pass other decimals through. */
+  private normalizeAmountFor(sellAsset: string, amount: string): string {
+    return tryParseStellarAssetIdentifier(sellAsset) ? normalizeStellarAmount(amount) : amount.trim()
   }
 
   /**
@@ -162,37 +237,47 @@ export class StellarSwapSDK {
   }
 
   /**
-   * Commit against one provider (`/v2/swap`). Carries the picked provider so the committed quote
-   * matches the shown price. `destinationAddress` is REQUIRED by the server even when it equals
-   * the source; this defaults it to `sourceAddress`.
+   * Commit against the picked provider (`/v2/swap`), carrying it so the committed quote matches the
+   * shown price. Handles both paths: a **Stellar in-chain** provider sends `chainId: stellar` and
+   * validates the Stellar addresses (and rejects a third-party recipient for SB/AQUARIUS); a
+   * **cross-chain** provider sends `refundAddress` (required, defaults to `sourceAddress`) and no
+   * `chainId`. `destinationAddress` defaults to `sourceAddress`.
    */
   async commit(params: CommitParams): Promise<CommittedRoute> {
-    const sell = parseStellarAssetIdentifier(params.sellAsset)
-    const buy = parseStellarAssetIdentifier(params.buyAsset)
-    assertAccount(params.sourceAddress, 'sourceAddress')
     const destinationAddress = params.destinationAddress ?? params.sourceAddress
-    assertAccount(destinationAddress, 'destinationAddress')
+    const stellar = isStellarProvider(params.provider)
+    const transfer = (CROSS_CHAIN_PROVIDERS as readonly string[]).includes(params.provider)
 
-    // SB and AQUARIUS settle on the trader account — reject a third-party recipient early.
-    if (
-      (params.provider === 'STELLARBROKER' || params.provider === 'AQUARIUS') &&
-      destinationAddress !== params.sourceAddress
-    ) {
-      throw new StellarSwapError(
-        'recipient_not_supported',
-        `${params.provider} settles on the trader account; destinationAddress must equal sourceAddress`
-      )
+    if (stellar) {
+      assertAccount(params.sourceAddress, 'sourceAddress')
+      assertAccount(destinationAddress, 'destinationAddress')
+      // SB and AQUARIUS settle on the trader account — reject a third-party recipient early.
+      if (
+        (params.provider === 'STELLARBROKER' || params.provider === 'AQUARIUS') &&
+        destinationAddress !== params.sourceAddress
+      ) {
+        throw new StellarSwapError(
+          'recipient_not_supported',
+          `${params.provider} settles on the trader account; destinationAddress must equal sourceAddress`
+        )
+      }
     }
 
     return this.client.swap({
-      chainId: STELLAR_CHAIN_ID,
-      sellAsset: sell.identifier,
-      buyAsset: buy.identifier,
-      sellAmount: normalizeStellarAmount(params.sellAmount),
+      sellAsset: this.normalizeAssetId(params.sellAsset),
+      buyAsset: this.normalizeAssetId(params.buyAsset),
+      sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
       slippage: params.slippage,
       provider: params.provider,
       sourceAddress: params.sourceAddress,
-      destinationAddress
+      destinationAddress,
+      // Keep each path's request exactly as the server expects: chainId for Stellar in-chain,
+      // refundAddress for NEAR transfer routes, neither for Axelar ITS (a signed Stellar tx).
+      ...(stellar
+        ? { chainId: STELLAR_CHAIN_ID }
+        : transfer
+          ? { refundAddress: params.refundAddress ?? params.sourceAddress }
+          : {})
     })
   }
 
@@ -202,18 +287,24 @@ export class StellarSwapSDK {
   }
 
   /**
-   * Execute a committed route with the trader's signer, dispatching on `execution.method`:
-   *   - `signed_transaction` → sign the server-built envelope and submit to Horizon.
-   *   - `stellar_broker`     → run the interactive WebSocket session (broker submits).
-   * Returns the hash to track (present even on a broker partial failure).
+   * Execute a committed route, dispatching on `execution.method`:
+   *   - `signed_transaction` → sign the server-built envelope and submit to Horizon (needs `signer`).
+   *   - `stellar_broker`     → run the interactive WebSocket session (needs `signer`).
+   *   - `transfer` (cross-chain) → Stellar origin + `signer`: build/sign/submit the deposit payment
+   *     and return its hash; any other origin (or no signer): return `result.deposit` to send yourself.
+   *
+   * `signer` is optional purely for the non-submitting cross-chain case; the Stellar methods throw
+   * without it. For `signed_transaction`/`stellar_broker` the returned hash is what you track.
    */
-  async execute(route: CommittedRoute, signer: StellarSigner, opts: ExecuteOptions = {}): Promise<ExecutionResult> {
+  async execute(route: CommittedRoute, signer?: StellarSigner, opts: ExecuteOptions = {}): Promise<ExecutionResult> {
     const execution = route.execution
     if (execution.method === 'signed_transaction') {
+      if (!signer) throw new StellarSwapError('signing_rejected', 'A signer is required for a signed_transaction route')
       const submit = await this.signedTx.execute(route, signer)
       return { method: 'signed_transaction', inboundTxHash: submit.hash, submit }
     }
     if (execution.method === 'stellar_broker') {
+      if (!signer) throw new StellarSwapError('signing_rejected', 'A signer is required for a stellar_broker route')
       const sellingAsset = parseBrokerAsset(execution.sellingAsset)
       const brokerSession = await this.broker.run({
         execution,
@@ -227,6 +318,10 @@ export class StellarSwapSDK {
         inboundTxHash: brokerSession.trackingHash,
         brokerSession
       }
+    }
+    if (execution.method === 'transfer') {
+      const res = await this.transfer.execute(route, signer)
+      return { method: 'transfer', submitted: res.submitted, deposit: res.deposit, inboundTxHash: res.inboundTxHash, submit: res.submit }
     }
     throw new StellarSwapError('invalid_params', `Unsupported execution method: ${(execution as { method: string }).method}`)
   }
@@ -285,6 +380,24 @@ export class StellarSwapSDK {
       if (Date.now() >= deadline) return status
       await delay(interval, opts.signal)
     }
+  }
+
+  // --- cross-chain helpers (the unified quote/commit/execute handle routing) ---
+
+  /**
+   * The cross-chain asset catalog for a `transfer` provider (`GET /v2/tokens`). Use the returned
+   * `identifier`s as `sellAsset`/`buyAsset` — never hand-build them. Defaults to NEAR.
+   */
+  async crossChainTokens(provider = 'NEAR'): Promise<TokenInfo[]> {
+    return this.client.tokens(provider)
+  }
+
+  /**
+   * The deposit a committed cross-chain (`transfer`) route requires, without submitting anything —
+   * for showing "send X to this address" when the origin isn't Stellar (or you handle the deposit).
+   */
+  depositFor(route: CommittedRoute): DepositInstruction {
+    return this.transfer.deposit(route)
   }
 }
 

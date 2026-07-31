@@ -19,8 +19,12 @@ export type SwapStatus =
   | 'error'
 
 export interface ExecuteSwapParams extends CommitParams {
-  /** The trader's signer (e.g. `keypairSigner(...)` or a wallet-kit adapter). */
-  signer: StellarSigner
+  /**
+   * The trader's signer. Required for Stellar in-chain routes and to submit a Stellar-origin
+   * cross-chain deposit; omit for a non-Stellar-origin cross-chain route (you'll get the deposit
+   * instruction on `execution.deposit` to send yourself).
+   */
+  signer?: StellarSigner
   /** Report the broadcast hash to `/v2/track` after execution. Default `true`. */
   track?: boolean
 }
