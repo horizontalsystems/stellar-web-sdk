@@ -14,7 +14,7 @@ export const STELLAR_PROVIDERS = [
 
 export type StellarProvider = (typeof STELLAR_PROVIDERS)[number]
 
-/** Providers that can settle to a destination ≠ source (see guide §3, §6). */
+/** Providers that can settle to a destination ≠ source. */
 export const RECIPIENT_CAPABLE_PROVIDERS = ['SOROSWAP', 'STELLAR_DEX'] as const
 
 /** Cross-chain (`transfer` / deposit-to-address) providers the unified quote also fans out to. */
@@ -59,13 +59,34 @@ export interface StellarSignedTx {
 }
 
 /**
- * `signed_transaction` execution for SOROSWAP / AQUARIUS / STELLAR_DEX — a server-built
- * Stellar envelope the client signs and submits verbatim.
+ * An EVM transaction request. Produced only by AXELAR_ITS on its Ethereum→Stellar direction,
+ * where the transaction has to be sent by an EVM wallet. This SDK builds and describes it but
+ * never signs it — `sdk.execute()` rejects it with a clear error, and the caller hands it to
+ * whatever EVM signer it already has. All numeric fields are hex-quantity strings.
+ */
+export interface EvmSignedTx {
+  kind: 'evm'
+  to: string
+  from: string
+  /** Hex-quantity wei to attach (the Axelar gas prepayment). */
+  value: string
+  /** Hex calldata. */
+  data: string
+  gas?: string
+  gasPrice: string
+}
+
+export type SignableTx = StellarSignedTx | EvmSignedTx
+
+/**
+ * `signed_transaction` execution for SOROSWAP / AQUARIUS / STELLAR_DEX / AXELAR_ITS — a fully
+ * built, unsigned transaction the client signs and broadcasts verbatim. `chain` says which
+ * network it belongs to, and each entry is tagged with its `kind`.
  */
 export interface SignedTransactionExecution {
   method: 'signed_transaction'
   chain: string
-  transactions: StellarSignedTx[]
+  transactions: SignableTx[]
 }
 
 /**

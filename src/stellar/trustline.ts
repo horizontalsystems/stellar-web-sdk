@@ -21,7 +21,7 @@ export interface TrustlineStatus {
  * Trustline gate for buying a classic asset. Buying an asset the recipient doesn't hold a
  * trustline for is rejected (server preflight / on-chain `op_no_trust`) — so the SDK checks the
  * recipient's balances first and offers activation (a `changeTrust` op) before quoting. Native
- * XLM never needs one. See guide §3.
+ * XLM never needs one.
  */
 export class TrustlineManager {
   private readonly horizon: HorizonClient

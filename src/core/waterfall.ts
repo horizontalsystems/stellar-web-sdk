@@ -6,7 +6,7 @@ export function routeProvider(route: Route): string | undefined {
 }
 
 /**
- * The StellarBroker-first waterfall (guide §3 — implement EXACTLY this):
+ * The StellarBroker-first waterfall:
  *
  *   1. If a STELLARBROKER route exists → pick it, even when a fallback shows a nominally
  *      higher `expectedBuyAmount`. SB's number is an estimate and it usually wins after
@@ -50,7 +50,7 @@ export function bestByExpected(routes: Route[]): Route | undefined {
  * Which providers to quote given whether a third-party recipient is involved. SB and AQUARIUS
  * settle on the trader's own account and can't pay a different destination — when the recipient
  * differs from the source, restrict the fan-out to the recipient-capable providers (SOROSWAP,
- * STELLAR_DEX). See guide §3.
+ * STELLAR_DEX).
  */
 export function providersForRecipient(hasThirdPartyRecipient: boolean): StellarProvider[] {
   if (!hasThirdPartyRecipient) return [...STELLAR_PROVIDERS]

@@ -18,7 +18,7 @@ export interface SignedTxPreview {
 }
 
 /**
- * The easy execution path (guide §4): SOROSWAP / AQUARIUS / STELLAR_DEX return a server-built
+ * The straightforward execution path: SOROSWAP / AQUARIUS / STELLAR_DEX return a fully built
  * envelope. Parse it (to preview fee + enforced minimum), sign it verbatim with the trader key,
  * and submit to Horizon. Do NOT re-sequence, re-fee, or rebuild — Soroban routes carry a
  * simulated resource footprint tied to exactly this tx.

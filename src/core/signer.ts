@@ -56,7 +56,7 @@ export async function signTransaction(
 /**
  * Cryptographically verify that `tx` already carries a valid signature FROM `publicKey`.
  *
- * This is the trader-signature detection the guide (§5) insists on: it must be a real
+ * This is the trader-signature detection the broker session requires: it must be a real
  * verification, NOT a 4-byte-hint comparison (spoofable) nor "has any signature" (StellarBroker's
  * channel accounts pre-sign classic txs, so a signature is always present). We check every
  * decorated signature against the trader key over the tx's signature-base hash.

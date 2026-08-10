@@ -14,9 +14,9 @@ import { HorizonClient } from '../../stellar/horizon.js'
 import { StellarSigner, authEntrySigner, signTransaction, txCarriesSignatureFrom } from '../../core/signer.js'
 import { TxMessage } from './messages.js'
 
-/** Per-tx debit headroom over the quoted selling amount (guide §5: ≤ sellingAmount × 1.02). */
+/** Per-tx debit headroom over the quoted selling amount (≤ sellingAmount × 1.02). */
 const DEBIT_HEADROOM_BPS = 200n // 2%
-/** At most this many DISTINCT debiting txs in one session (guide §5). NOT a cumulative budget. */
+/** At most this many DISTINCT debiting txs in one session. NOT a cumulative budget. */
 const MAX_DEBITING_TXS = 5
 
 /** SEP-41 methods that must never debit/authorize the trader inside a broker-built tx. */
@@ -40,7 +40,7 @@ export interface SignResult {
 }
 
 /**
- * The StellarBroker signing pipeline (guide §5). The broker builds every transaction; these
+ * The StellarBroker signing pipeline. The broker builds every transaction; these
  * checks are the client's ONLY defense. Order matters:
  *
  *   1. Shape validation — every op is an InvokeHostFunction or a path payment that pays the
@@ -257,7 +257,7 @@ export class SigningPipeline {
   private async signSorobanFirstPass(message: TxMessage): Promise<SignResult> {
     const env = xdr.TransactionEnvelope.fromXDR(message.xdr, 'base64')
     const inner = env.v1().tx()
-    // Guide §5: signatureExpirationLedger = tx maxLedger + 1.
+    // signatureExpirationLedger = tx maxLedger + 1.
     const maxLedger = maxLedgerFromCond(inner.cond())
     const validUntil = maxLedger !== undefined ? maxLedger + 1 : await this.horizonLedgerFallback()
 

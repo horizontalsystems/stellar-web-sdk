@@ -12,11 +12,11 @@ import {
   TxMessage
 } from './messages.js'
 
-/** Timeouts (ms) — the guide's live-tuned values. */
+/** Timeouts (ms) — live-tuned against the broker. */
 const CONNECTED_TIMEOUT = 5_000
 const QUOTE_TIMEOUT = 15_000
 const SESSION_CEILING = 180_000
-/** Drop the session if the broker goes silent this long (guide: 20s watchdog). */
+/** Drop the session if the broker goes silent this long (20s watchdog). */
 const SILENCE_WATCHDOG = 20_000
 
 export interface BrokerSessionCallbacks {
@@ -36,7 +36,7 @@ export interface BrokerSessionResult {
   bought?: string
   /**
    * The tracking handle — the LAST signed fee-bump hash. Present whenever ANY tx was signed,
-   * even on failure (a partial fill may have moved value; you MUST still track it — guide §5).
+   * even on failure (a partial fill may have moved value; you MUST still track it).
    */
   trackingHash?: string
   /** Every outer fee-bump hash we signed, in order. */
@@ -56,7 +56,7 @@ export interface RunSessionOptions {
 }
 
 /**
- * Runs one StellarBroker execution session (guide §5). Connect → live quote → confirm trade →
+ * Runs one StellarBroker execution session. Connect → live quote → confirm trade →
  * sign each broker-built tx through the security pipeline → settle. The broker submits every
  * transaction; the client only signs. On ANY failure after a signature, the last fee-bump hash
  * is still returned so the swap can be tracked (partial fills included).

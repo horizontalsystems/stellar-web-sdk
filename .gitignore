@@ -5,9 +5,5 @@ dist/
 .idea/
 *.log
 
-# demo build output
-demo/app.bundle.js
-demo/app.bundle.js.map
-
 # secrets
 .env

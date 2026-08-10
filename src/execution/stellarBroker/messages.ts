@@ -1,5 +1,5 @@
 /**
- * StellarBroker WebSocket protocol message shapes (guide §5). The broker is the source of
+ * StellarBroker WebSocket protocol message shapes. The broker is the source of
  * truth for every field; we type only what the session driver reads and keep the rest open.
  */
 

@@ -1,7 +1,7 @@
 {
   "name": "stellar-web-sdk",
   "version": "0.1.0",
-  "description": "Web SDK for Stellar swaps against uswap-server — StellarBroker-first waterfall over StellarBroker, Soroswap, Aquarius and Stellar DEX, with client-native execution (signed-transaction + StellarBroker WebSocket session) and server-side tracking.",
+  "description": "Self-contained Stellar swap SDK: provider adapters (StellarBroker, Soroswap, Aquarius, Stellar DEX, NEAR, Axelar ITS), quote fetching and normalization, route construction, provider fan-out and the StellarBroker-first routing solver, with client-native execution.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,7 +19,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -28,9 +29,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:react": "tsc -p tsconfig.react.json --noEmit",
     "test": "npm run build && node test/run.mjs",
-    "demo:build": "npm run build && node demo/build.mjs",
-    "demo": "npm run demo:build && node demo/serve.mjs",
-    "clean": "rm -rf dist demo/app.bundle.js demo/app.bundle.js.map"
+    "clean": "rm -rf dist",
+    "bench": "npm run build && node bench/routing.mjs"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.3.0"
@@ -56,10 +56,22 @@
   "keywords": [
     "stellar",
     "swap",
+    "dex",
+    "defi",
     "stellarbroker",
     "soroswap",
     "aquarius",
-    "uswap",
-    "defi"
-  ]
+    "soroban",
+    "axelar",
+    "near-intents",
+    "uswap"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/horizontalsystems/stellar-web-sdk.git"
+  },
+  "homepage": "https://github.com/horizontalsystems/stellar-web-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/horizontalsystems/stellar-web-sdk/issues"
+  }
 }

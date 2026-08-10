@@ -1,6 +1,8 @@
-import { ResolvedConfig, StellarSwapConfig, resolveConfig } from './core/config.js'
+import { ResolvedConfig, StellarSwapConfig, requireServer, resolveConfig } from './core/config.js'
 import { StellarSwapError } from './core/errors.js'
 import { UswapClient } from './client/UswapClient.js'
+import { LocalRouter } from './routing/LocalRouter.js'
+import { discoverProviders } from './routing/registry.js'
 import { TrustlineManager, TrustlineStatus } from './stellar/trustline.js'
 import { HorizonClient, HorizonSubmitResult } from './stellar/horizon.js'
 import { SignedTransactionExecutor, SignedTxPreview } from './execution/signedTransaction.js'
@@ -12,10 +14,8 @@ import {
 } from './execution/stellarBroker/StellarBrokerSession.js'
 import { parseBrokerAsset, parseStellarAssetIdentifier, tryParseStellarAssetIdentifier } from './core/assets.js'
 import { StellarSigner, assertAccount } from './core/signer.js'
-import { isThirdPartyRecipient, providersForRecipient, routeProvider, selectUnifiedRoute } from './core/waterfall.js'
+import { routeProvider, selectUnifiedRoute } from './core/waterfall.js'
 import {
-  AXELAR_ITS_TICKERS,
-  AXELAR_PROVIDERS,
   CommittedRoute,
   CROSS_CHAIN_PROVIDERS,
   ProviderError,
@@ -31,39 +31,6 @@ import { normalizeStellarAmount } from './core/amounts.js'
 /** True when `provider` is a Stellar in-chain provider (vs a cross-chain `transfer` provider). */
 function isStellarProvider(provider: string): boolean {
   return (STELLAR_PROVIDERS as readonly string[]).includes(provider)
-}
-
-/**
- * A pair is cross-chain unless BOTH assets are Stellar-native identifiers. Determines the routing
- * automatically: Stellar-native pairs go to the Stellar providers, everything else to NEAR.
- */
-function isCrossChainPair(sellAsset: string, buyAsset: string): boolean {
-  return !(tryParseStellarAssetIdentifier(sellAsset) && tryParseStellarAssetIdentifier(buyAsset))
-}
-
-/** Split a `CHAIN.TICKER[-ADDRESS]` identifier into its chain code and ticker. */
-function chainAndTicker(id: string): { chain: string; ticker: string } | undefined {
-  const s = id.trim()
-  const dot = s.indexOf('.')
-  if (dot <= 0) return undefined
-  const rest = s.slice(dot + 1)
-  const dash = rest.indexOf('-')
-  const ticker = dash >= 0 ? rest.slice(0, dash) : rest
-  return ticker ? { chain: s.slice(0, dot), ticker } : undefined
-}
-
-/**
- * An Axelar ITS pair is a **same-token** bridge between Stellar (`XLM.…`) and Ethereum (`ETH.…`)
- * for a token AXELAR_ITS supports (XLM, SHX today) — routed via the AXELAR_ITS provider. Checked
- * before the generic cross-chain (NEAR) fallback.
- */
-function isAxelarPair(sellAsset: string, buyAsset: string): boolean {
-  const a = chainAndTicker(sellAsset)
-  const b = chainAndTicker(buyAsset)
-  if (!a || !b || a.ticker !== b.ticker) return false
-  if (!(AXELAR_ITS_TICKERS as readonly string[]).includes(a.ticker)) return false
-  const chains = new Set([a.chain, b.chain])
-  return chains.size === 2 && chains.has('XLM') && chains.has('ETH')
 }
 
 export interface QuoteParams {
@@ -88,10 +55,15 @@ export interface QuoteResult {
   provider?: string
   /** True when the pick is a cross-chain (`transfer`) provider rather than Stellar in-chain. */
   crossChain: boolean
-  /** Every route the server returned, for display/debug. */
+  /** Every route that came back, for display/debug. */
   allRoutes: Route[]
   /** Providers that couldn't serve the pair. */
   providerErrors: ProviderError[]
+  /**
+   * Per-provider wall-clock in ms. Populated in `'local'` routing, where the SDK made the calls
+   * itself and can measure them; empty in `'server'` routing, where the fan-out happened remotely.
+   */
+  timings: Record<string, number>
 }
 
 export interface CommitParams extends QuoteParams {
@@ -153,6 +125,8 @@ export class StellarSwapSDK {
   readonly client: UswapClient
   readonly trustlines: TrustlineManager
   readonly horizon: HorizonClient
+  /** The local routing stack (discovery → fan-out → waterfall). Exposed for inspection and benchmarks. */
+  readonly router: LocalRouter
   private readonly signedTx: SignedTransactionExecutor
   private readonly broker: StellarBrokerSession
   private readonly transfer: TransferExecutor
@@ -162,9 +136,15 @@ export class StellarSwapSDK {
     this.client = new UswapClient(this.config)
     this.trustlines = new TrustlineManager(this.config)
     this.horizon = new HorizonClient(this.config)
+    this.router = new LocalRouter(this.config, this.horizon)
     this.signedTx = new SignedTransactionExecutor(this.config)
     this.broker = new StellarBrokerSession(this.config)
     this.transfer = new TransferExecutor(this.config)
+  }
+
+  /** Whether routes are priced by this package's adapters (`'local'`) or by a uswap-server (`'server'`). */
+  private get isLocal(): boolean {
+    return this.config.routing === 'local'
   }
 
   /**
@@ -177,17 +157,35 @@ export class StellarSwapSDK {
    * The caller needn't know the path — check `QuoteResult.crossChain`. Pass `providers` to override.
    */
   async quote(params: QuoteParams): Promise<QuoteResult> {
-    const axelar = isAxelarPair(params.sellAsset, params.buyAsset)
-    const crossChain = axelar || isCrossChainPair(params.sellAsset, params.buyAsset)
-    const thirdParty =
-      !crossChain && !!params.sourceAddress && isThirdPartyRecipient(params.sourceAddress, params.destinationAddress)
-    const providers =
-      params.providers ??
-      (axelar
-        ? [...AXELAR_PROVIDERS]
-        : crossChain
-          ? [...CROSS_CHAIN_PROVIDERS]
-          : providersForRecipient(thirdParty))
+    if (this.isLocal) {
+      const result = await this.router.quote({
+        sellAsset: this.normalizeAssetId(params.sellAsset),
+        buyAsset: this.normalizeAssetId(params.buyAsset),
+        sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
+        slippage: params.slippage,
+        ...(params.sourceAddress ? { sourceAddress: params.sourceAddress } : {}),
+        ...(params.destinationAddress ? { destinationAddress: params.destinationAddress } : {}),
+        ...(params.providers ? { providers: params.providers } : {})
+      })
+      return {
+        route: result.route,
+        provider: result.provider,
+        crossChain: result.discovery.crossChain,
+        allRoutes: result.allRoutes,
+        providerErrors: result.providerErrors,
+        timings: result.timings
+      }
+    }
+
+    const discovery = discoverProviders({
+      sellAsset: params.sellAsset,
+      buyAsset: params.buyAsset,
+      ...(params.sourceAddress ? { sourceAddress: params.sourceAddress } : {}),
+      ...(params.destinationAddress ? { destinationAddress: params.destinationAddress } : {}),
+      ...(params.providers ? { providers: params.providers } : {})
+    })
+    const crossChain = discovery.crossChain
+    const providers = discovery.providers
 
     const res = await this.client.rate({
       // Stellar-native pairs keep the original `chainId: stellar` request; cross-chain assets
@@ -207,7 +205,9 @@ export class StellarSwapSDK {
       provider: route ? routeProvider(route) : undefined,
       crossChain,
       allRoutes: routes,
-      providerErrors: res.providerErrors ?? []
+      providerErrors: res.providerErrors ?? [],
+      // The fan-out happened on the server, so there is nothing local to time.
+      timings: {}
     }
   }
 
@@ -261,6 +261,21 @@ export class StellarSwapSDK {
           `${params.provider} settles on the trader account; destinationAddress must equal sourceAddress`
         )
       }
+    }
+
+    if (this.isLocal) {
+      return this.router.commit({
+        sellAsset: this.normalizeAssetId(params.sellAsset),
+        buyAsset: this.normalizeAssetId(params.buyAsset),
+        sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
+        slippage: params.slippage,
+        dry: false,
+        provider: params.provider,
+        sourceAddress: params.sourceAddress,
+        destinationAddress,
+        // Cross-chain providers refund to the origin chain; default to the sender.
+        ...(transfer ? { refundAddress: params.refundAddress ?? params.sourceAddress } : {})
+      })
     }
 
     return this.client.swap({
@@ -339,7 +354,7 @@ export class StellarSwapSDK {
     const execution = await this.execute(route, signer, opts)
 
     // Tracking is best-effort: a failed status call must NEVER discard a completed/partial
-    // execution (the hash lives on `execution.inboundTxHash` for a manual retry — guide §5).
+    // execution (the hash lives on `execution.inboundTxHash` for a manual retry).
     let track: TrackResponse | undefined
     let trackError: unknown
     if (execution.inboundTxHash) {
@@ -360,8 +375,17 @@ export class StellarSwapSDK {
     return { execution, track }
   }
 
-  /** Report the broadcast hash and read current status (`POST /v2/track`). */
+  /**
+   * Report the broadcast hash and read current status (`POST /v2/track`).
+   *
+   * Tracking is the one capability local routing does not replace: reconciling a swap's outcome
+   * means watching Horizon after the fact, which is a server's job, not a page's. Configure
+   * `apiBaseUrl` + `apiKey` to use it in either routing mode. Without a server, a
+   * `signed_transaction` route's outcome is already known the moment Horizon returns from the
+   * submit (`ExecutionResult.submit`), since that call blocks until ledger inclusion.
+   */
   async track(uuid: string, inboundTxHash?: string): Promise<TrackResponse> {
+    requireServer(this.config, 'track()')
     return this.client.track({ uuid, ...(inboundTxHash ? { inboundTxHash } : {}) })
   }
 
@@ -389,6 +413,7 @@ export class StellarSwapSDK {
    * `identifier`s as `sellAsset`/`buyAsset` — never hand-build them. Defaults to NEAR.
    */
   async crossChainTokens(provider = 'NEAR'): Promise<TokenInfo[]> {
+    if (this.isLocal) return this.router.crossChainTokens(provider)
     return this.client.tokens(provider)
   }
 
