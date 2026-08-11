@@ -20,7 +20,7 @@ import {
   toStroops
 } from '../../core/amounts.js'
 import { Fee, Route } from '../../core/types.js'
-import { makeRoute, makeSignedTxExecution, replaceInboundFee } from '../../routing/route.js'
+import { makeRoute, makeSignedTxExecution, replaceInboundFee, trackingStellar } from '../../routing/route.js'
 import { stellarPreflight } from '../../stellar/preflight.js'
 import { httpJson, providerError } from '../http.js'
 import { ProviderContext, ProviderQuoteRequest } from '../types.js'
@@ -216,6 +216,14 @@ export async function getQuote(
     fees,
     estimatedTime: ESTIMATED_TIME,
     expiresAt: Date.now() + TX_TIMEOUT_SECONDS * 1000,
-    execution: makeSignedTxExecution({ chain: 'XLM', xdr: prepared.toXDR() })
+    execution: makeSignedTxExecution({ chain: 'XLM', xdr: prepared.toXDR() }),
+    tracking: trackingStellar({
+      provider: PROVIDER,
+      fromAsset: sellAsset.identifier,
+      toAsset: buyAsset.identifier,
+      toAddress: source,
+      fromAddress: source,
+      fromAmount: sellAmount
+    })
   })
 }

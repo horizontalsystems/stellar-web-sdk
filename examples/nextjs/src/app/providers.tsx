@@ -7,43 +7,44 @@ import type { StellarSwapConfig } from 'stellar-web-sdk'
 /**
  * Client boundary that builds one SDK and shares it via context.
  *
- * DEMO ONLY: the uswap-server API key is read from a `NEXT_PUBLIC_` var, so it ships to the
- * browser. In production, keep the key server-side — point `apiBaseUrl` at a Next.js route
- * handler that injects `X-API-Key` and proxies to uswap-server.
+ * The SDK needs no backend and no configuration to start — it talks to the swap providers
+ * directly. The only optional credentials are the upstream venues' own: Soroswap requires a key
+ * (without one it declines and the other three Stellar providers still serve the pair), and
+ * StellarBroker needs a partner key to commit a session.
+ *
+ * Credentials come from the repository-root `.env`, mapped onto `NEXT_PUBLIC_*` in
+ * `next.config.mjs` so all three examples share one file.
+ *
+ * DEMO ONLY: `NEXT_PUBLIC_` vars ship to the browser. In production,
+ * leave `credentials` unset and pass a `fetch` that routes the provider calls through a Next.js
+ * route handler which attaches the keys server-side.
  */
 export function Providers({ children }: { children: ReactNode }) {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_USWAP_API_BASE_URL ?? ''
-  const apiKey = process.env.NEXT_PUBLIC_USWAP_API_KEY ?? ''
+  const soroswapApiKey = process.env.NEXT_PUBLIC_SOROSWAP_API_KEY ?? ''
+  const stellarBrokerPartnerKey = process.env.NEXT_PUBLIC_STELLARBROKER_PARTNER_KEY ?? ''
+  const nearApiJwt = process.env.NEXT_PUBLIC_NEAR_API_JWT ?? ''
+  const validationCloudApiKey = process.env.NEXT_PUBLIC_VALIDATION_CLOUD_API_KEY ?? ''
+  const validationCloudHost = process.env.NEXT_PUBLIC_VALIDATION_CLOUD_HOST ?? ''
 
-  const config = useMemo<StellarSwapConfig | undefined>(
-    () => (apiBaseUrl && apiKey ? { apiBaseUrl, apiKey } : undefined),
-    [apiBaseUrl, apiKey]
+  const config = useMemo<StellarSwapConfig>(
+    () => ({
+      credentials: {
+        ...(soroswapApiKey ? { soroswapApiKey } : {}),
+        ...(stellarBrokerPartnerKey ? { stellarBrokerPartnerKey } : {}),
+        ...(nearApiJwt ? { nearApiJwt } : {})
+      },
+      // One key, resolved by the SDK into both the Horizon and Soroban RPC endpoints.
+      ...(validationCloudApiKey
+        ? {
+            validationCloud: {
+              apiKey: validationCloudApiKey,
+              ...(validationCloudHost ? { host: validationCloudHost } : {})
+            }
+          }
+        : {})
+    }),
+    [soroswapApiKey, stellarBrokerPartnerKey, nearApiJwt, validationCloudApiKey, validationCloudHost]
   )
-
-  // Building the SDK with an empty apiBaseUrl/apiKey throws (`apiBaseUrl is required`). Show a
-  // setup notice instead of crashing the whole tree so the fix is obvious.
-  if (!config) return <MissingEnvNotice apiBaseUrl={apiBaseUrl} apiKey={apiKey} />
 
   return <StellarSwapProvider config={config}>{children}</StellarSwapProvider>
-}
-
-function MissingEnvNotice({ apiBaseUrl, apiKey }: { apiBaseUrl: string; apiKey: string }) {
-  return (
-    <main>
-      <h1>Setup needed</h1>
-      <p className="lead">
-        The SDK needs uswap-server credentials. Create <code>examples/nextjs/.env.local</code> (copy
-        from <code>.env.local.example</code>) and set both values, then restart <code>npm run dev</code>
-        — <code>NEXT_PUBLIC_*</code> vars are inlined at startup.
-      </p>
-      <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 8, fontSize: 13, overflowX: 'auto' }}>
-{`NEXT_PUBLIC_USWAP_API_BASE_URL=https://swap-dev.unstoppable.money/api
-NEXT_PUBLIC_USWAP_API_KEY=your-sdk-api-key`}
-      </pre>
-      <p className="note info">
-        apiBaseUrl: {apiBaseUrl ? <code>{apiBaseUrl}</code> : <b>missing</b>} · apiKey:{' '}
-        {apiKey ? 'set' : <b>missing</b>}
-      </p>
-    </main>
-  )
 }

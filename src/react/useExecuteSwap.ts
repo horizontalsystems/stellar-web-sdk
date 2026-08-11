@@ -25,7 +25,7 @@ export interface ExecuteSwapParams extends CommitParams {
    * instruction on `execution.deposit` to send yourself).
    */
   signer?: StellarSigner
-  /** Report the broadcast hash to `/v2/track` after execution. Default `true`. */
+  /** Read the swap outcome after execution. Default `true`. */
   track?: boolean
 }
 

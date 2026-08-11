@@ -6,7 +6,7 @@
  * Ported from `uswap-server/src/providers/soroswap/`. Two pieces of defensive logic below are the
  * reason this adapter is not a thin proxy over the aggregator, and both were added after live
  * mispricings: the `aqua` venue exclusion and the `otherAmountThreshold` clamp. They are kept
- * verbatim because they change which route the waterfall sees.
+ * verbatim because they change which route selection sees.
  *
  * Authentication: every Soroswap swap endpoint requires a `sk_…` bearer key (403 without one)
  * despite their OpenAPI marking them public.
@@ -22,7 +22,7 @@ import {
   toStroops
 } from '../../core/amounts.js'
 import { Fee, Route } from '../../core/types.js'
-import { makeRoute, makeSignedTxExecution } from '../../routing/route.js'
+import { makeRoute, makeSignedTxExecution, trackingStellar } from '../../routing/route.js'
 import { stellarPreflight } from '../../stellar/preflight.js'
 import { httpJson, providerError } from '../http.js'
 import { ProviderContext, ProviderQuoteRequest } from '../types.js'
@@ -234,7 +234,15 @@ export async function getQuote(
     estimatedTime: ESTIMATED_TIME,
     // The built transaction carries Soroswap's own timebounds — surface the real deadline.
     expiresAt: xdrExpiry(xdr, context.config.networkPassphrase),
-    execution: makeSignedTxExecution({ chain: 'XLM', xdr })
+    execution: makeSignedTxExecution({ chain: 'XLM', xdr }),
+    tracking: trackingStellar({
+      provider: PROVIDER,
+      fromAsset: sellAsset.identifier,
+      toAsset: buyAsset.identifier,
+      toAddress: destination,
+      fromAddress: source,
+      fromAmount: sellAmount
+    })
   })
 }
 

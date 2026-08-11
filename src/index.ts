@@ -7,8 +7,8 @@
  * client-side too: signed envelopes go straight to Horizon, and StellarBroker routes run the
  * interactive WebSocket session with its full signing pipeline.
  *
- * Set `routing: 'server'` to price through a uswap-server `/v2` deployment instead; tracking uses
- * one in either mode.
+ * Outcome tracking runs the same way: Horizon for the Stellar-native providers, 1Click's status
+ * endpoint for NEAR, the Axelarscan GMP API for Axelar ITS. No backend is involved anywhere.
  */
 
 export { StellarSwapSDK } from './StellarSwapSDK.js'
@@ -21,7 +21,7 @@ export type {
   PollOptions
 } from './StellarSwapSDK.js'
 
-export type { StellarSwapConfig, ResolvedConfig, RoutingMode } from './core/config.js'
+export type { StellarSwapConfig, ResolvedConfig, ValidationCloudConfig } from './core/config.js'
 export { StellarSwapError } from './core/errors.js'
 export type { StellarSwapErrorCode } from './core/errors.js'
 
@@ -111,7 +111,10 @@ export type { AxelarItsAsset, AxelarItsEntry } from './providers/axelar/config.j
 export { encodeInterchainTransfer, INTERCHAIN_TRANSFER_SELECTOR } from './providers/axelar/abi.js'
 export { stellarPreflight } from './stellar/preflight.js'
 
-// Waterfall policy (exported for custom routing / testing)
+// Outcome tracking — Horizon for the Stellar providers, 1Click for NEAR, Axelarscan for Axelar.
+export { trackRoute, trackStellar, trackNear, trackAxelar, sumEffects } from './tracking/index.js'
+
+// Route-selection policy (exported for custom ranking / testing)
 export {
   selectRoute,
   selectUnifiedRoute,
@@ -120,10 +123,9 @@ export {
   isThirdPartyRecipient,
   routeProvider,
   compareDecimals
-} from './core/waterfall.js'
+} from './core/selection.js'
 
 // Services (advanced use)
-export { UswapClient } from './client/UswapClient.js'
 export { TrustlineManager } from './stellar/trustline.js'
 export type { TrustlineStatus } from './stellar/trustline.js'
 export { HorizonClient, accountHoldsTrustline } from './stellar/horizon.js'
@@ -151,6 +153,7 @@ export type {
   StellarBrokerExecution,
   TransferExecution,
   TokenInfo,
+  RouteTracking,
   StellarSignedTx,
   EvmSignedTx,
   SignableTx,
@@ -158,15 +161,10 @@ export type {
   FeeType,
   EstimatedTime,
   Accuracy,
-  RateRequest,
-  RateResponse,
-  SwapRequest,
   ProviderError,
-  TrackRequest,
   TrackResponse,
   TrackStatus,
   TrackLeg,
-  BalanceEntry,
   StellarProvider
 } from './core/types.js'
 export {

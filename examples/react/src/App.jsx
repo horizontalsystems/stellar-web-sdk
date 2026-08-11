@@ -1,18 +1,18 @@
 import { useMemo, useState } from 'react'
-import { StellarSwapSDK } from 'stellar-web-sdk'
+import { createSdk, envStatus } from './lib/sdk.js'
 import { StellarSwapProvider } from 'stellar-web-sdk/react'
 import { Swap } from './components/Swap.jsx'
-import { Note } from './components/Note.jsx'
-import { DEFAULT_API_BASE_URL } from './lib/constants.js'
 
 export function App() {
-  const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL)
-  const [apiKey, setApiKey] = useState('')
+  const [soroswapApiKey, setSoroswapApiKey] = useState('')
+  const [brokerPartnerKey, setBrokerPartnerKey] = useState('')
 
-  // Build one SDK once both credentials are present; pass the instance straight to the provider.
+  // The SDK needs no backend, so it is always constructible. Both keys below belong to the
+  // upstream venues, and both are optional: without the Soroswap key that one provider declines
+  // and the rest still serve the pair; the broker key is only needed to commit a session.
   const sdk = useMemo(
-    () => (apiBaseUrl && apiKey ? new StellarSwapSDK({ apiBaseUrl, apiKey }) : null),
-    [apiBaseUrl, apiKey]
+    () => createSdk({ soroswapApiKey, stellarBrokerPartnerKey: brokerPartnerKey }),
+    [soroswapApiKey, brokerPartnerKey]
   )
 
   return (
@@ -24,23 +24,24 @@ export function App() {
       </p>
 
       <fieldset>
+        <p className="note info">
+          From the repo-root <code>.env</code>: soroswap key <b>{envStatus.soroswap ? 'set' : 'not set'}</b> ·
+          broker partner key <b>{envStatus.broker ? 'set' : 'not set'}</b> · RPC <b>{envStatus.rpc}</b>.
+          The fields below override them.
+        </p>
         <label>
-          API base URL
-          <input value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} />
+          Soroswap API key (optional)
+          <input type="password" placeholder="sk_… — without it Soroswap declines" value={soroswapApiKey} onChange={(e) => setSoroswapApiKey(e.target.value)} />
         </label>
         <label>
-          API key (X-API-Key)
-          <input type="password" placeholder="your SDK key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          StellarBroker partner key (optional — needed to commit an SB route)
+          <input type="password" placeholder="partner key" value={brokerPartnerKey} onChange={(e) => setBrokerPartnerKey(e.target.value)} />
         </label>
       </fieldset>
 
-      {sdk ? (
-        <StellarSwapProvider sdk={sdk}>
-          <Swap />
-        </StellarSwapProvider>
-      ) : (
-        <Note kind="info">Enter an API key to begin.</Note>
-      )}
+      <StellarSwapProvider sdk={sdk}>
+        <Swap />
+      </StellarSwapProvider>
     </main>
   )
 }

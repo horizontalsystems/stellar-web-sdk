@@ -1,8 +1,7 @@
-import { ResolvedConfig, StellarSwapConfig, requireServer, resolveConfig } from './core/config.js'
+import { ResolvedConfig, StellarSwapConfig, resolveConfig } from './core/config.js'
 import { StellarSwapError } from './core/errors.js'
-import { UswapClient } from './client/UswapClient.js'
 import { LocalRouter } from './routing/LocalRouter.js'
-import { discoverProviders } from './routing/registry.js'
+import { trackRoute } from './tracking/index.js'
 import { TrustlineManager, TrustlineStatus } from './stellar/trustline.js'
 import { HorizonClient, HorizonSubmitResult } from './stellar/horizon.js'
 import { SignedTransactionExecutor, SignedTxPreview } from './execution/signedTransaction.js'
@@ -14,13 +13,12 @@ import {
 } from './execution/stellarBroker/StellarBrokerSession.js'
 import { parseBrokerAsset, parseStellarAssetIdentifier, tryParseStellarAssetIdentifier } from './core/assets.js'
 import { StellarSigner, assertAccount } from './core/signer.js'
-import { routeProvider, selectUnifiedRoute } from './core/waterfall.js'
 import {
   CommittedRoute,
   CROSS_CHAIN_PROVIDERS,
   ProviderError,
   Route,
-  STELLAR_CHAIN_ID,
+  RouteTracking,
   STELLAR_PROVIDERS,
   TERMINAL_STATUSES,
   TokenInfo,
@@ -49,7 +47,7 @@ export interface QuoteParams {
 }
 
 export interface QuoteResult {
-  /** The route the unified policy picked (Stellar in-chain preferred, else cross-chain). */
+  /** The picked route: the best `expectedBuyAmount` available (Stellar in-chain preferred). */
   route?: Route
   /** The provider the policy picked. */
   provider?: string
@@ -84,7 +82,7 @@ export interface ExecuteOptions {
 
 export interface ExecutionResult {
   method: 'signed_transaction' | 'stellar_broker' | 'transfer'
-  /** The hash to report to `/v2/track`. Undefined if a broker session signed nothing, or a cross-chain deposit wasn't submitted by the SDK. */
+  /** The broadcast hash to track by. Undefined if a broker session signed nothing, or a cross-chain deposit wasn't submitted by the SDK. */
   inboundTxHash?: string
   /** Present for `signed_transaction` routes and submitted Stellar-origin `transfer` deposits. */
   submit?: HorizonSubmitResult
@@ -108,32 +106,34 @@ export interface PollOptions {
 }
 
 /**
- * Top-level Stellar swap SDK. Implements the StellarBroker-first waterfall over uswap-server's
- * four Stellar providers and runs execution client-side: server-built envelopes are signed and
- * submitted to Horizon; StellarBroker routes run the interactive WebSocket session. Tracking is
- * server-side by `uuid` + broadcast hash.
+ * Top-level Stellar swap SDK. Everything runs against the providers directly — quoting, route
+ * selection, execution and outcome tracking alike. There is no backend in the path.
  *
  * Typical flow:
  *   const q = await sdk.quote({ sellAsset, buyAsset, sellAmount, slippage, sourceAddress })
  *   // (optional) trustline gate on q.route.buyAsset before committing
  *   const route = await sdk.commit({ ...quoteParams, provider: q.provider! })
  *   const exec = await sdk.execute(route, signer, { callbacks })
- *   await sdk.track(route.uuid, exec.inboundTxHash)
+ *   await sdk.track(route, exec.inboundTxHash)
  */
 export class StellarSwapSDK {
   readonly config: ResolvedConfig
-  readonly client: UswapClient
   readonly trustlines: TrustlineManager
   readonly horizon: HorizonClient
-  /** The local routing stack (discovery → fan-out → waterfall). Exposed for inspection and benchmarks. */
+  /** The local routing stack (discovery → fan-out → selection). Exposed for inspection and benchmarks. */
   readonly router: LocalRouter
+  /**
+   * Committed routes by uuid, so `track(uuid)` works without the caller threading the route back
+   * in. In-memory only and deliberately so — persisting swap state is the application's decision,
+   * not the SDK's.
+   */
+  private readonly committed = new Map<string, CommittedRoute>()
   private readonly signedTx: SignedTransactionExecutor
   private readonly broker: StellarBrokerSession
   private readonly transfer: TransferExecutor
 
-  constructor(config: StellarSwapConfig) {
+  constructor(config: StellarSwapConfig = {}) {
     this.config = resolveConfig(config)
-    this.client = new UswapClient(this.config)
     this.trustlines = new TrustlineManager(this.config)
     this.horizon = new HorizonClient(this.config)
     this.router = new LocalRouter(this.config, this.horizon)
@@ -142,72 +142,32 @@ export class StellarSwapSDK {
     this.transfer = new TransferExecutor(this.config)
   }
 
-  /** Whether routes are priced by this package's adapters (`'local'`) or by a uswap-server (`'server'`). */
-  private get isLocal(): boolean {
-    return this.config.routing === 'local'
-  }
-
   /**
    * Price the swap, choosing the provider set automatically from the assets:
-   *   - **Stellar-native** pair (both assets Stellar) → the four Stellar providers (SB-first
-   *     waterfall, with the recipient-capable subset for a third-party recipient).
+   *   - **Stellar-native** pair (both assets Stellar) → the four Stellar providers, narrowed to
+   *     the recipient-capable subset for a third-party recipient. Best `expectedBuyAmount` wins.
    *   - **Axelar ITS** pair (same token bridged Stellar ↔ Ethereum, e.g. `XLM.XLM`↔`ETH.XLM-0x…`)
    *     → the `AXELAR_ITS` provider.
    *   - any other **cross-chain** pair → NEAR only.
    * The caller needn't know the path — check `QuoteResult.crossChain`. Pass `providers` to override.
    */
   async quote(params: QuoteParams): Promise<QuoteResult> {
-    if (this.isLocal) {
-      const result = await this.router.quote({
-        sellAsset: this.normalizeAssetId(params.sellAsset),
-        buyAsset: this.normalizeAssetId(params.buyAsset),
-        sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
-        slippage: params.slippage,
-        ...(params.sourceAddress ? { sourceAddress: params.sourceAddress } : {}),
-        ...(params.destinationAddress ? { destinationAddress: params.destinationAddress } : {}),
-        ...(params.providers ? { providers: params.providers } : {})
-      })
-      return {
-        route: result.route,
-        provider: result.provider,
-        crossChain: result.discovery.crossChain,
-        allRoutes: result.allRoutes,
-        providerErrors: result.providerErrors,
-        timings: result.timings
-      }
-    }
-
-    const discovery = discoverProviders({
-      sellAsset: params.sellAsset,
-      buyAsset: params.buyAsset,
-      ...(params.sourceAddress ? { sourceAddress: params.sourceAddress } : {}),
-      ...(params.destinationAddress ? { destinationAddress: params.destinationAddress } : {}),
-      ...(params.providers ? { providers: params.providers } : {})
-    })
-    const crossChain = discovery.crossChain
-    const providers = discovery.providers
-
-    const res = await this.client.rate({
-      // Stellar-native pairs keep the original `chainId: stellar` request; cross-chain assets
-      // encode their own chains, so none is sent.
-      ...(crossChain ? {} : { chainId: STELLAR_CHAIN_ID }),
+    const result = await this.router.quote({
       sellAsset: this.normalizeAssetId(params.sellAsset),
       buyAsset: this.normalizeAssetId(params.buyAsset),
       sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
       slippage: params.slippage,
-      providers
+      ...(params.sourceAddress ? { sourceAddress: params.sourceAddress } : {}),
+      ...(params.destinationAddress ? { destinationAddress: params.destinationAddress } : {}),
+      ...(params.providers ? { providers: params.providers } : {})
     })
-
-    const routes = res.routes ?? []
-    const route = selectUnifiedRoute(routes)
     return {
-      route,
-      provider: route ? routeProvider(route) : undefined,
-      crossChain,
-      allRoutes: routes,
-      providerErrors: res.providerErrors ?? [],
-      // The fan-out happened on the server, so there is nothing local to time.
-      timings: {}
+      route: result.route,
+      provider: result.provider,
+      crossChain: result.discovery.crossChain,
+      allRoutes: result.allRoutes,
+      providerErrors: result.providerErrors,
+      timings: result.timings
     }
   }
 
@@ -237,11 +197,12 @@ export class StellarSwapSDK {
   }
 
   /**
-   * Commit against the picked provider (`/v2/swap`), carrying it so the committed quote matches the
-   * shown price. Handles both paths: a **Stellar in-chain** provider sends `chainId: stellar` and
-   * validates the Stellar addresses (and rejects a third-party recipient for SB/AQUARIUS); a
-   * **cross-chain** provider sends `refundAddress` (required, defaults to `sourceAddress`) and no
-   * `chainId`. `destinationAddress` defaults to `sourceAddress`.
+   * Commit against the picked provider, carrying it so the committed quote matches the price that
+   * was shown. This is where a route becomes executable: the adapter builds its transaction (or its
+   * session parameters), pre-flights the accounts, and attaches the tracking handle.
+   *
+   * `destinationAddress` defaults to `sourceAddress`. A cross-chain provider also takes a
+   * `refundAddress`, defaulting to the sender.
    */
   async commit(params: CommitParams): Promise<CommittedRoute> {
     const destinationAddress = params.destinationAddress ?? params.sourceAddress
@@ -263,37 +224,23 @@ export class StellarSwapSDK {
       }
     }
 
-    if (this.isLocal) {
-      return this.router.commit({
-        sellAsset: this.normalizeAssetId(params.sellAsset),
-        buyAsset: this.normalizeAssetId(params.buyAsset),
-        sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
-        slippage: params.slippage,
-        dry: false,
-        provider: params.provider,
-        sourceAddress: params.sourceAddress,
-        destinationAddress,
-        // Cross-chain providers refund to the origin chain; default to the sender.
-        ...(transfer ? { refundAddress: params.refundAddress ?? params.sourceAddress } : {})
-      })
-    }
-
-    return this.client.swap({
+    const route = await this.router.commit({
       sellAsset: this.normalizeAssetId(params.sellAsset),
       buyAsset: this.normalizeAssetId(params.buyAsset),
       sellAmount: this.normalizeAmountFor(params.sellAsset, params.sellAmount),
       slippage: params.slippage,
+      dry: false,
       provider: params.provider,
       sourceAddress: params.sourceAddress,
       destinationAddress,
-      // Keep each path's request exactly as the server expects: chainId for Stellar in-chain,
-      // refundAddress for NEAR transfer routes, neither for Axelar ITS (a signed Stellar tx).
-      ...(stellar
-        ? { chainId: STELLAR_CHAIN_ID }
-        : transfer
-          ? { refundAddress: params.refundAddress ?? params.sourceAddress }
-          : {})
+      // Cross-chain providers refund to the origin chain; default to the sender.
+      ...(transfer ? { refundAddress: params.refundAddress ?? params.sourceAddress } : {})
     })
+
+    // Remember it so `track(uuid)` works without the caller threading the route back in. The
+    // registry is in-memory only — after a reload, pass the stored route itself.
+    this.committed.set(route.uuid, route)
+    return route
   }
 
   /** Preview a `signed_transaction` route's fee + enforced minimum before signing. */
@@ -342,7 +289,7 @@ export class StellarSwapSDK {
   }
 
   /**
-   * Execute AND report to `/v2/track` in one call — including on a StellarBroker partial failure
+   * Execute AND read the outcome in one call — including on a StellarBroker partial failure
    * (value may already have moved; never drop a session that signed anything). Rethrows the
    * broker error after tracking so the caller still learns the swap failed.
    */
@@ -359,7 +306,7 @@ export class StellarSwapSDK {
     let trackError: unknown
     if (execution.inboundTxHash) {
       try {
-        track = await this.track(route.uuid, execution.inboundTxHash)
+        track = await this.track(route, execution.inboundTxHash)
       } catch (err) {
         trackError = err
       }
@@ -376,29 +323,38 @@ export class StellarSwapSDK {
   }
 
   /**
-   * Report the broadcast hash and read current status (`POST /v2/track`).
+   * Read the current outcome of a committed route, straight from the source of truth: Horizon for
+   * the Stellar-native providers, 1Click's status endpoint for NEAR, the Axelarscan GMP API for
+   * Axelar ITS.
    *
-   * Tracking is the one capability local routing does not replace: reconciling a swap's outcome
-   * means watching Horizon after the fact, which is a server's job, not a page's. Configure
-   * `apiBaseUrl` + `apiKey` to use it in either routing mode. Without a server, a
-   * `signed_transaction` route's outcome is already known the moment Horizon returns from the
-   * submit (`ExecutionResult.submit`), since that call blocks until ledger inclusion.
+   * Pass the committed route, or the `uuid` of one committed by this SDK instance. After a page
+   * reload the in-memory registry is empty, so persist the route (its `tracking` handle is all that
+   * is needed) and pass it back.
+   *
+   * `inboundTxHash` is the broadcast hash, required wherever the provider is keyed by one. NEAR is
+   * keyed by its deposit address instead, so a NEAR route can be tracked before anything is sent.
    */
-  async track(uuid: string, inboundTxHash?: string): Promise<TrackResponse> {
-    requireServer(this.config, 'track()')
-    return this.client.track({ uuid, ...(inboundTxHash ? { inboundTxHash } : {}) })
+  async track(
+    route: CommittedRoute | string,
+    inboundTxHash?: string,
+    signal?: AbortSignal
+  ): Promise<TrackResponse> {
+    const tracking = this.resolveTracking(route)
+    return trackRoute(tracking, inboundTxHash, this.router.context, this.horizon, signal)
   }
 
-  /** Poll `/v2/track` until a terminal status (or timeout). */
-  async pollTrack(uuid: string, inboundTxHash: string | undefined, opts: PollOptions = {}): Promise<TrackResponse> {
-    const interval = opts.intervalMs ?? 60_000
+  /** Poll {@link track} until a terminal status (or timeout). */
+  async pollTrack(
+    route: CommittedRoute | string,
+    inboundTxHash: string | undefined,
+    opts: PollOptions = {}
+  ): Promise<TrackResponse> {
+    const tracking = this.resolveTracking(route)
+    const interval = opts.intervalMs ?? 15_000
     const deadline = Date.now() + (opts.timeoutMs ?? 60 * 60_000)
-    // Send the hash on the first poll; subsequent polls only need the uuid (server remembers it).
-    let hash = inboundTxHash
     for (;;) {
       if (opts.signal?.aborted) throw new StellarSwapError('aborted', 'Polling aborted')
-      const status = await this.track(uuid, hash)
-      hash = undefined
+      const status = await trackRoute(tracking, inboundTxHash, this.router.context, this.horizon, opts.signal)
       opts.onUpdate?.(status)
       if (TERMINAL_STATUSES.includes(status.status)) return status
       if (Date.now() >= deadline) return status
@@ -406,15 +362,28 @@ export class StellarSwapSDK {
     }
   }
 
+  /** Resolve a route or a uuid to its tracking handle. */
+  private resolveTracking(route: CommittedRoute | string): RouteTracking {
+    if (typeof route !== 'string') return route.tracking
+    const known = this.committed.get(route)
+    if (!known) {
+      throw new StellarSwapError(
+        'invalid_params',
+        `No committed route known for uuid ${route}. The uuid registry is in-memory only — ` +
+          `after a reload, pass the stored CommittedRoute itself.`
+      )
+    }
+    return known.tracking
+  }
+
   // --- cross-chain helpers (the unified quote/commit/execute handle routing) ---
 
   /**
-   * The cross-chain asset catalog for a `transfer` provider (`GET /v2/tokens`). Use the returned
-   * `identifier`s as `sellAsset`/`buyAsset` — never hand-build them. Defaults to NEAR.
+   * The cross-chain asset catalog for a `transfer` provider, straight from the provider. Use the
+   * returned `identifier`s as `sellAsset`/`buyAsset` — never hand-build them. Defaults to NEAR.
    */
   async crossChainTokens(provider = 'NEAR'): Promise<TokenInfo[]> {
-    if (this.isLocal) return this.router.crossChainTokens(provider)
-    return this.client.tokens(provider)
+    return this.router.crossChainTokens(provider)
   }
 
   /**

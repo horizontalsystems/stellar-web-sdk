@@ -14,7 +14,7 @@ import { Account, Asset, Operation, TransactionBuilder } from '@stellar/stellar-
 import { parseStellarAssetIdentifier, toStellarSdkAsset } from '../../core/assets.js'
 import { floorAfterSlippage, fromStroops, normalizeStellarAmount, toStroops } from '../../core/amounts.js'
 import { Fee, Route } from '../../core/types.js'
-import { makeRoute, makeSignedTxExecution } from '../../routing/route.js'
+import { makeRoute, makeSignedTxExecution, trackingStellar } from '../../routing/route.js'
 import { HorizonPathRecord } from '../../stellar/horizon.js'
 import { stellarPreflight } from '../../stellar/preflight.js'
 import { providerError } from '../http.js'
@@ -172,7 +172,15 @@ export async function getQuote(
     fees,
     estimatedTime: ESTIMATED_TIME,
     expiresAt: Date.now() + TX_TIMEOUT_SECONDS * 1000,
-    execution: makeSignedTxExecution({ chain: 'XLM', xdr })
+    execution: makeSignedTxExecution({ chain: 'XLM', xdr }),
+    tracking: trackingStellar({
+      provider: PROVIDER,
+      fromAsset: sellAsset.identifier,
+      toAsset: buyAsset.identifier,
+      toAddress: destination,
+      fromAddress: source,
+      fromAmount: sellAmount
+    })
   })
 }
 

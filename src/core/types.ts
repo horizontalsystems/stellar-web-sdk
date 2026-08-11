@@ -1,7 +1,8 @@
 /**
- * Wire types for the uswap-server `/v2` contract, narrowed to the Stellar surface the
- * SDK actually touches. Mirrors `uswap-server/API.md` §3–§6. Fields the SDK never reads
- * are typed loosely (`unknown`/`Record`) so a server-side additive change can't break us.
+ * The shared vocabulary of the SDK: routes, executions, fees and tracking. Provider adapters
+ * produce these, the solver ranks them, the executors consume them, and the trackers report
+ * against them. Fields an adapter may not populate are optional rather than empty-valued, so
+ * "absent" and "zero" stay distinguishable.
  */
 
 /** The four Stellar-native providers this SDK routes across. */
@@ -49,7 +50,7 @@ export interface Fee {
 }
 
 // ---------------------------------------------------------------------------
-// Execution blocks (§5)
+// Execution blocks
 // ---------------------------------------------------------------------------
 
 export interface StellarSignedTx {
@@ -90,10 +91,10 @@ export interface SignedTransactionExecution {
 }
 
 /**
- * `stellar_broker` execution — the session parameters the client uses to run the
- * interactive WebSocket trade. NOTE the unit/format differences vs the `/v2` request:
- * `slippageTolerance` is a FRACTION (0.01 = 1%), and assets are SB's wire form
- * (`CODE-GISSUER…` / `XLM`, no `XLM.` prefix). Use these verbatim — never re-derive them.
+ * `stellar_broker` execution — the session parameters the client uses to run the interactive
+ * WebSocket trade. NOTE the unit/format differences from a quote request: `slippageTolerance` is a
+ * FRACTION (0.01 = 1%), and assets are SB's wire form (`CODE-GISSUER…` / `XLM`, no `XLM.` prefix).
+ * Use these verbatim — never re-derive them.
  */
 export interface StellarBrokerExecution {
   method: 'stellar_broker'
@@ -104,16 +105,16 @@ export interface StellarBrokerExecution {
   sellingAmount: string
   /** FRACTION (0–0.5), NOT bps/percent. */
   slippageTolerance: number
-  /** Partner key from the server — pass as `?partner=` on the WS URL. */
+  /** Partner key — passed as `?partner=` on the WebSocket URL. */
   partnerKey?: string
 }
 
 /**
  * `transfer` execution for cross-chain providers (e.g. NEAR / 1Click). There is no envelope to
  * sign: the trader sends `amount` of `asset` (with the memo/tag in `attachment`) to `depositAddress`
- * on the origin `chain`, and the provider fills the destination side. For some origin chains the
- * server can hand back a prebuilt `unsignedTx`; when it can't, `unsignedTxUnavailable` says why and
- * the client builds the deposit itself.
+ * on the origin `chain`, and the provider fills the destination side. A Stellar-origin deposit is
+ * built by this SDK; for any other origin chain `unsignedTxUnavailable` says so and the connected
+ * wallet builds the transfer itself.
  */
 export interface TransferExecution {
   method: 'transfer'
@@ -127,16 +128,16 @@ export interface TransferExecution {
   asset: string
   /** Memo / destination tag required by the deposit, if any (Stellar memo, XRP tag, …). */
   attachment?: { type: string; value: string }
-  /** Base64/hex unsigned deposit tx the client may sign, when the server could build one. */
+  /** Base64 unsigned deposit tx the client may sign, when the SDK could build one. */
   unsignedTx?: string
-  /** Present instead of `unsignedTx` when the server couldn't prebuild one (e.g. `chain_not_supported`). */
+  /** Present instead of `unsignedTx` when the SDK can't build one (e.g. `chain_not_supported`). */
   unsignedTxUnavailable?: string
 }
 
 export type Execution = SignedTransactionExecution | StellarBrokerExecution | TransferExecution
 
 // ---------------------------------------------------------------------------
-// Routes (§3, §4)
+// Routes
 // ---------------------------------------------------------------------------
 
 /** Per-phase time estimate for a route, in seconds. */
@@ -148,7 +149,7 @@ export interface EstimatedTime {
   total: number
 }
 
-/** Quote accuracy metadata the server attaches to a route (informational). */
+/** Quote accuracy metadata a provider may attach to a route (informational). */
 export interface Accuracy {
   matched: number
   total: number
@@ -156,7 +157,32 @@ export interface Accuracy {
 }
 
 /**
- * A route from `/v2/rate` (economics only) or `/v2/swap` (adds `execution` + `uuid`).
+ * What tracking needs to follow a committed route to its outcome. Built by the adapter that
+ * produced the route, because only it knows which identifiers its venue is keyed by — a Stellar
+ * swap is found by transaction hash, a NEAR swap by deposit address and memo, an Axelar transfer
+ * by its source-chain hash across two hub hops.
+ *
+ * This travels on the route so that tracking needs no server-side record of the swap: everything
+ * required to verify the outcome against the chain (or the provider's own status endpoint) is in
+ * the object the caller already holds.
+ */
+export interface RouteTracking {
+  provider: string
+  fromAsset: string
+  toAsset: string
+  toAddress: string
+  fromAddress?: string
+  fromAmount?: string
+  /** Cross-chain deposit rails (NEAR): the swap is keyed by these, not by a transaction hash. */
+  depositAddress?: string
+  depositMemo?: string
+  /** Bridges (AXELAR_ITS): the chain codes the two hub hops run between. */
+  fromChain?: string
+  toChain?: string
+}
+
+/**
+ * A route from a dry quote (economics only) or a committed quote (adds `execution` + `uuid`).
  */
 export interface Route {
   /** Providers in the route (one today). `providers[0]` is the provider name. */
@@ -176,53 +202,28 @@ export interface Route {
   meta?: Record<string, unknown>
   /** Unix ms after which a cross-chain quote's price/deposit is stale (cross-chain routes). */
   expiresAt?: number
-  /** Present only on committed (`/v2/swap`) routes. */
+  /** Present only on committed routes. */
   execution?: Execution
-  /** Tracking handle — present only on committed routes. Store it. */
+  /** Correlation handle for the caller's own records. Present only on committed routes. */
   uuid?: string
+  /** What `sdk.track()` needs to follow this route. Present only on committed routes. */
+  tracking?: RouteTracking
 }
 
-/** A committed route is guaranteed to carry `execution` + `uuid`. */
+/** A committed route is guaranteed to carry `execution`, `uuid` and `tracking`. */
 export interface CommittedRoute extends Route {
   execution: Execution
   uuid: string
+  tracking: RouteTracking
 }
 
-/** A provider that couldn't serve the pair, with an optional min/max hint (as sent by the server). */
+/** A provider that couldn't serve the pair, with an optional min/max hint. */
 export interface ProviderError {
   provider: string
   error: string
   errorCode?: string
   minimumAmount?: number
   maximumAmount?: number
-}
-
-export interface RateResponse {
-  routes: Route[]
-  providerErrors?: ProviderError[]
-}
-
-// ---------------------------------------------------------------------------
-// Requests (§3, §4)
-// ---------------------------------------------------------------------------
-
-export interface RateRequest {
-  chainId?: string
-  sellAsset: string
-  buyAsset: string
-  sellAmount: string
-  /** PERCENT (1 = 1%). */
-  slippage: number
-  /** Narrow the fan-out. Defaults to all four Stellar providers. */
-  providers?: string[]
-}
-
-export interface SwapRequest extends RateRequest {
-  provider: string
-  sourceAddress: string
-  destinationAddress: string
-  /** Where refunds go if the swap can't complete. REQUIRED by cross-chain (`transfer`) providers. */
-  refundAddress?: string
 }
 
 /**
@@ -246,7 +247,7 @@ export interface TokenInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Tracking (§6)
+// Tracking
 // ---------------------------------------------------------------------------
 
 export type TrackStatus =
@@ -277,7 +278,7 @@ export interface TrackLeg {
   toAddress?: string
 }
 
-/** Current tracking state for a committed swap (`POST /v2/track`). */
+/** Current tracking state for a committed swap, as read from the provider or the chain. */
 export interface TrackResponse {
   status: TrackStatus
   providers: string[]
@@ -291,22 +292,3 @@ export interface TrackResponse {
   meta?: Record<string, unknown> & { pauseReason?: string; sellAmountUsd?: string }
 }
 
-/** Report the broadcast hash (first call) and/or poll status for a committed swap's `uuid`. */
-export interface TrackRequest {
-  uuid: string
-  inboundTxHash?: string
-}
-
-// ---------------------------------------------------------------------------
-// Balances (§7) — used for trustline detection
-// ---------------------------------------------------------------------------
-
-/** One balance line from `/v2/balance` (used for trustline detection). */
-export interface BalanceEntry {
-  identifier: string
-  amount: string
-  /** Present on classic assets. */
-  ticker?: string
-  address?: string
-  [k: string]: unknown
-}

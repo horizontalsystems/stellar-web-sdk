@@ -28,7 +28,7 @@ export interface TransferResult {
   submitted: boolean
   /** The deposit the swap needs — always present, so a non-submitting caller knows what to send. */
   deposit: DepositInstruction
-  /** Deposit tx hash to report to `/v2/track` — present only when `submitted`. */
+  /** Deposit tx hash to track by — present only when `submitted`. */
   inboundTxHash?: string
   /** Horizon submit result — present only when `submitted`. */
   submit?: HorizonSubmitResult

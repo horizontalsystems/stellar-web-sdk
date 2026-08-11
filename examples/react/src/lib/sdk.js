@@ -1,5 +1,5 @@
-// SDK construction helpers — the only module that imports stellar-web-sdk directly.
-import { StellarSwapSDK, keypairSigner } from 'stellar-web-sdk'
+// SDK construction for the React example — mirrors examples/vanilla/src/sdk.js.
+import { StellarSwapSDK } from 'stellar-web-sdk'
 
 // Compile-time constants injected from the repo-root .env (see examples/load-env.mjs). Declared
 // with `typeof` guards so the module still loads if the bundle was built without them.
@@ -39,21 +39,8 @@ export function createSdk({ soroswapApiKey, stellarBrokerPartnerKey } = {}) {
 }
 
 /** What the build injected, for the page to show without revealing the values. */
-export function envStatus() {
-  return {
-    soroswap: !!ENV.soroswapApiKey,
-    broker: !!ENV.stellarBrokerPartnerKey,
-    rpc: ENV.validationCloudApiKey ? 'validation cloud' : 'public'
-  }
-}
-
-/** Derive an in-memory signer from a secret seed, or undefined if it's blank/invalid. */
-export function createSigner(secret) {
-  const seed = (secret || '').trim()
-  if (!seed.startsWith('S')) return undefined
-  try {
-    return keypairSigner(seed)
-  } catch {
-    return undefined
-  }
+export const envStatus = {
+  soroswap: !!ENV.soroswapApiKey,
+  broker: !!ENV.stellarBrokerPartnerKey,
+  rpc: ENV.validationCloudApiKey ? 'validation cloud' : 'public'
 }

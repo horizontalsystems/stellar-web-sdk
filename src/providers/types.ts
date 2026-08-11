@@ -1,10 +1,10 @@
 /**
  * The provider-adapter contract. Every adapter under `src/providers/<name>/` is a plain
  * `getQuote(request, context, signal) => Promise<Route>` function: it fetches a quote from its
- * upstream venue, normalizes the numbers, and constructs a {@link Route} identical in shape to
- * what `uswap-server`'s `/v2/rate` returns. Route *discovery* (which adapters to call) lives in
+ * upstream venue, normalizes the numbers, and constructs the {@link Route} every other layer
+ * consumes. Route *discovery* (which adapters to call) lives in
  * `src/routing/registry.ts`, the parallel fan-out in `src/routing/fanout.ts`, and the
- * routing/solver policy in `src/core/waterfall.ts`.
+ * route-selection policy in `src/core/selection.ts`.
  *
  * Ported from `uswap-server/src/providers/*` and `src/api/quote/*`. The server-only concerns —
  * the `UserFee` table, sanction haircuts, analytics rows, swap records, affiliate splits,
@@ -18,8 +18,9 @@ import { HorizonClient } from '../stellar/horizon.js'
 import { Route } from '../core/types.js'
 
 /**
- * Why a provider declined to quote. Mirrors `uswap-server`'s `QuoteErrorCode` so a route that
- * fails here reports the same reason the hosted server would report for the same pair.
+ * Why a provider declined to quote. The vocabulary is deliberately finer than the SDK's public
+ * error codes: "this pair has no liquidity" and "this asset is not supported" are different facts
+ * about a route, and the fan-out reports each one per provider.
  */
 export type QuoteErrorCode =
   | 'rateExpired'
@@ -100,9 +101,9 @@ function sdkCodeFor(code: QuoteErrorCode): StellarSwapError['code'] {
 }
 
 /**
- * What an adapter is asked to price. This is the client-side equivalent of the server's
- * `QuoteRequest`: one exact-input side, slippage as a PERCENT (1 = 1%), and a `dry` flag that
- * decides whether the adapter merely prices the route or also builds its executable form.
+ * What an adapter is asked to price: one exact-input side, slippage as a PERCENT (1 = 1%), and a
+ * `dry` flag deciding whether the adapter merely prices the route or also builds its executable
+ * form.
  */
 export interface ProviderQuoteRequest {
   /** Canonical identifier — `XLM.XLM`, `XLM.CODE-GISSUER…`, or a cross-chain `CHAIN.TICKER-ADDRESS`. */
@@ -110,7 +111,7 @@ export interface ProviderQuoteRequest {
   buyAsset: string
   /** Decimal string, whole units. */
   sellAmount: string
-  /** PERCENT (1 = 1%), matching the `/v2` contract. */
+  /** PERCENT (1 = 1%). */
   slippage: number
   /**
    * `true` → price only (no accounts touched, no tx built, no upstream order created).
@@ -161,15 +162,13 @@ export interface ProviderEndpoints {
 }
 
 /**
- * Tunables that change which route wins. Every default here is the value the hosted server runs
- * with, so a client-side fan-out ranks routes identically to `/v2/rate` unless deliberately
- * overridden. They are surfaced as configuration precisely so the policy is inspectable rather
- * than buried in a deployment's environment.
+ * Tunables that change which route wins. They are surfaced as configuration precisely so the
+ * policy is inspectable rather than buried in a deployment's environment.
  */
 export interface RoutingTunables {
-  /** Per-provider time budget, ms. Server default: 12_000. */
+  /** Per-provider time budget, ms. Default 12_000. */
   providerTimeoutMs?: number
-  /** Whole fan-out budget, ms. Server default: 15_000. */
+  /** Whole fan-out budget, ms. Default 15_000. */
   overallTimeoutMs?: number
   /**
    * Venues requested from the Soroswap aggregator. `aqua` is excluded by default — Soroswap's

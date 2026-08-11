@@ -19,7 +19,7 @@
 
 import { formatUnits, parseUnits } from '../../core/amounts.js'
 import { Fee, Route, TokenInfo } from '../../core/types.js'
-import { makeRoute, makeTransferExecution } from '../../routing/route.js'
+import { makeRoute, makeTransferExecution, trackingNear } from '../../routing/route.js'
 import { httpJson, providerError } from '../http.js'
 import { ProviderContext, ProviderQuoteRequest } from '../types.js'
 
@@ -283,6 +283,15 @@ export async function getQuote(
       // Only a Stellar-origin deposit can be built here; every other origin chain is the
       // connected wallet's job, and the execution block says so explicitly.
       canBuildTx: sellToken.chain === 'XLM'
+    }),
+    tracking: trackingNear({
+      fromAsset: sellToken.identifier,
+      toAsset: buyToken.identifier,
+      toAddress: request.destinationAddress!,
+      depositAddress: quote.depositAddress,
+      ...(quote.depositMemo ? { depositMemo: quote.depositMemo } : {}),
+      ...(request.sourceAddress ? { fromAddress: request.sourceAddress } : {}),
+      fromAmount: sellAmount
     })
   })
 }

@@ -2,9 +2,9 @@
  * Route construction — assembling the normalized {@link Route} an adapter returns, plus the
  * `execution` blocks that describe how each route is carried out.
  *
- * Ported from `uswap-server/src/api/v2/quoting/native.ts`. The output is byte-compatible with
- * what `/v2/rate` and `/v2/swap` return, so the waterfall, the executors, and the React hooks
- * consume a locally-built route and a server-built one through the same code path.
+ * Ported from `uswap-server/src/api/v2/quoting/native.ts`. Every adapter produces this one shape,
+ * so selection, the executors, the trackers and the React hooks all consume any provider's
+ * route through the same code path.
  */
 
 import {
@@ -12,6 +12,7 @@ import {
   Execution,
   Fee,
   Route,
+  RouteTracking,
   SignedTransactionExecution,
   StellarBrokerExecution,
   TransferExecution
@@ -47,6 +48,7 @@ export interface MakeRouteArgs {
   expiresAt?: number
   meta?: Record<string, unknown>
   execution?: Execution
+  tracking?: RouteTracking
 }
 
 /**
@@ -65,7 +67,84 @@ export function makeRoute(args: MakeRouteArgs): Route {
     estimatedTime: args.estimatedTime,
     ...(args.expiresAt != null ? { expiresAt: args.expiresAt } : {}),
     ...(args.meta != null ? { meta: args.meta } : {}),
-    ...(args.execution ? { execution: args.execution } : {})
+    ...(args.execution ? { execution: args.execution } : {}),
+    ...(args.tracking ? { tracking: args.tracking } : {})
+  }
+}
+
+/**
+ * Tracking handle for the four Stellar-native providers. The real identifier is the settled
+ * Stellar transaction hash, which is not known until the client broadcasts — for StellarBroker,
+ * not until the broker submits and the session reports the fee-bump hash. So the handle carries
+ * what is needed to *verify* the outcome on Horizon once that hash exists, and the hash itself is
+ * supplied to `track()` at call time.
+ */
+export function trackingStellar(args: {
+  provider: string
+  fromAsset: string
+  toAsset: string
+  toAddress: string
+  fromAddress?: string
+  fromAmount?: string
+}): RouteTracking {
+  return {
+    provider: args.provider,
+    fromAsset: args.fromAsset,
+    toAsset: args.toAsset,
+    toAddress: args.toAddress,
+    ...(args.fromAddress ? { fromAddress: args.fromAddress } : {}),
+    ...(args.fromAmount ? { fromAmount: args.fromAmount } : {})
+  }
+}
+
+/**
+ * Tracking handle for NEAR. Keyed by deposit address rather than a transaction hash, plus the
+ * deposit memo on MEMO-mode chains (Stellar among them): 1Click shares one deposit address across
+ * quotes there and keys the swap by the pair, so a status lookup without the memo does not resolve.
+ */
+export function trackingNear(args: {
+  fromAsset: string
+  toAsset: string
+  toAddress: string
+  depositAddress: string
+  depositMemo?: string
+  fromAddress?: string
+  fromAmount?: string
+}): RouteTracking {
+  return {
+    provider: 'NEAR',
+    fromAsset: args.fromAsset,
+    toAsset: args.toAsset,
+    toAddress: args.toAddress,
+    depositAddress: args.depositAddress,
+    ...(args.depositMemo ? { depositMemo: args.depositMemo } : {}),
+    ...(args.fromAddress ? { fromAddress: args.fromAddress } : {}),
+    ...(args.fromAmount ? { fromAmount: args.fromAmount } : {})
+  }
+}
+
+/**
+ * Tracking handle for an Axelar ITS transfer. Followed by source-chain hash across two GMP hub
+ * hops, so both chain codes are needed to resolve the second one.
+ */
+export function trackingAxelar(args: {
+  fromAsset: string
+  toAsset: string
+  toAddress: string
+  fromChain: string
+  toChain: string
+  fromAddress?: string
+  fromAmount?: string
+}): RouteTracking {
+  return {
+    provider: 'AXELAR_ITS',
+    fromAsset: args.fromAsset,
+    toAsset: args.toAsset,
+    toAddress: args.toAddress,
+    fromChain: args.fromChain,
+    toChain: args.toChain,
+    ...(args.fromAddress ? { fromAddress: args.fromAddress } : {}),
+    ...(args.fromAmount ? { fromAmount: args.fromAmount } : {})
   }
 }
 

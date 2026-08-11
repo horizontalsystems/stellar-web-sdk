@@ -45,7 +45,7 @@ export class SignedTransactionExecutor {
 
   /**
    * Sign and submit the committed route's envelope. Returns the Horizon result — its `hash` is
-   * what you report to `/v2/track`. Horizon submit is synchronous, so a failure surfaces here.
+   * what you track by. Horizon submit is synchronous, so a failure surfaces here.
    */
   async execute(route: CommittedRoute, signer: StellarSigner): Promise<HorizonSubmitResult> {
     const { tx } = this.preview(route)

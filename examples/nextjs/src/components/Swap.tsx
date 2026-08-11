@@ -40,7 +40,7 @@ export function Swap() {
   const [trustError, setTrustError] = useState<StellarSwapError>()
   const [confirming, setConfirming] = useState(false)
 
-  const track = useTrackStatus(swap.route?.uuid, swap.execution?.inboundTxHash, {
+  const track = useTrackStatus(swap.route, swap.execution?.inboundTxHash, {
     enabled: !!swap.execution?.inboundTxHash,
     intervalMs: 5_000
   })
@@ -162,7 +162,7 @@ export function Swap() {
         <Note kind="ok">
           Committed <code>{swap.route?.uuid}</code>. Send <b>{deposit.amount} {deposit.asset}</b> on <b>{deposit.chain}</b> to{' '}
           <b>{deposit.depositAddress}</b>
-          {deposit.attachment && <> · memo ({deposit.attachment.type}) <b>{deposit.attachment.value}</b></>}, then track by uuid.
+          {deposit.attachment && <> · memo ({deposit.attachment.type}) <b>{deposit.attachment.value}</b></>}, then track it.
         </Note>
       )}
       {swap.execution?.submitted !== false && swap.status === 'success' && (

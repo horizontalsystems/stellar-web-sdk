@@ -49,20 +49,3 @@ export class StellarSwapError extends Error {
   }
 }
 
-/** Map an HTTP status from the uswap-server contract to an error code (API.md §9). */
-export function codeForStatus(status: number): StellarSwapErrorCode {
-  switch (status) {
-    case 400:
-      return 'invalid_params'
-    case 404:
-      return 'no_route'
-    case 409:
-      return 'rate_expired'
-    case 502:
-    case 503:
-    case 504:
-      return 'provider_error'
-    default:
-      return 'server_error'
-  }
-}

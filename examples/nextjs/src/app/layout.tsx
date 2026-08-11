@@ -4,7 +4,7 @@ import './globals.css'
 
 export const metadata = {
   title: 'stellar-web-sdk — Next.js example',
-  description: 'StellarBroker-first swap waterfall driven by the React hooks'
+  description: 'Stellar swap routing across six providers, driven by the React hooks'
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -41,14 +41,16 @@ ok('toStroops', toStroops('1.0000001') === 10000001n)
 ok('fromStroops', fromStroops(10000001n) === '1.0000001')
 ok('strip trailing', normalizeStellarAmount('2.5000000') === '2.5')
 
-console.log('\n# waterfall (SB-first even when fallback is nominally higher)')
+console.log('\n# route selection (best output, no provider preferred)')
 const routes = [
   { providers: ['SOROSWAP'], expectedBuyAmount: '105', minBuyAmount: '104' },
   { providers: ['STELLARBROKER'], expectedBuyAmount: '100', minBuyAmount: null },
   { providers: ['STELLAR_DEX'], expectedBuyAmount: '103', minBuyAmount: '102' }
 ]
-ok('SB wins despite lower number', selectRoute(routes).providers[0] === 'STELLARBROKER')
-ok('best fallback when no SB', selectRoute(routes.filter(r => r.providers[0] !== 'STELLARBROKER')).providers[0] === 'SOROSWAP')
+ok('best-priced route wins', selectRoute(routes).providers[0] === 'SOROSWAP')
+ok('SB is not preferred when it quotes less', selectRoute(routes).providers[0] !== 'STELLARBROKER')
+ok('SB wins when it quotes the most',
+  selectRoute(routes.map(r => r.providers[0] === 'STELLARBROKER' ? { ...r, expectedBuyAmount: '110' } : r)).providers[0] === 'STELLARBROKER')
 ok('recipient filter (all)', providersForRecipient(false).length === 4)
 ok('recipient filter (3rd party)', JSON.stringify(providersForRecipient(true)) === JSON.stringify(['SOROSWAP', 'STELLAR_DEX']))
 ok('compareDecimals', compareDecimals('10.5', '10.49') > 0 && compareDecimals('9', '10') < 0 && compareDecimals('1.0', '1') === 0)

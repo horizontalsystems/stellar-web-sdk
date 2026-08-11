@@ -3,6 +3,17 @@ import { ResolvedConfig } from '../core/config.js'
 import { StellarSwapError } from '../core/errors.js'
 import { StellarAsset, horizonAssetString, horizonAssetType, isNativeAsset } from '../core/assets.js'
 
+/** One effect from `GET /transactions/{hash}/effects`. Amounts are 7-dp decimal strings. */
+export interface HorizonEffect {
+  type: string
+  account?: string
+  asset_type?: string
+  asset_code?: string
+  asset_issuer?: string
+  amount?: string
+  paging_token?: string
+}
+
 /** One alternative returned by Horizon path-finding. Amounts are 7-dp decimal strings. */
 export interface HorizonPathRecord {
   source_amount: string
@@ -137,6 +148,67 @@ export class HorizonClient {
       })
     }
     return body._embedded?.records ?? []
+  }
+
+  /**
+   * `GET /transactions/{hash}` — the settled transaction, or `null` when Horizon has not indexed
+   * it (404). A fee-bumped transaction resolves by either its outer or its inner hash.
+   */
+  async getTransaction(
+    hash: string,
+    signal?: AbortSignal
+  ): Promise<{ successful: boolean; source_account?: string; ledger?: number } | null> {
+    const res = await this.fetch(
+      `/transactions/${encodeURIComponent(hash)}`,
+      { method: 'GET', signal },
+      this.config.requestTimeoutMs
+    )
+    if (res.status === 404) return null
+    const body = (await res.json().catch(() => ({}))) as {
+      successful?: boolean
+      source_account?: string
+      ledger?: number
+    }
+    if (!res.ok) {
+      throw new StellarSwapError('server_error', `Horizon /transactions failed (${res.status})`, {
+        status: res.status,
+        details: body
+      })
+    }
+    return { successful: body.successful === true, source_account: body.source_account, ledger: body.ledger }
+  }
+
+  /**
+   * All effects of a transaction, following Horizon's cursor. A busy transaction — a broker
+   * multi-hop trade emits counterparty effects per hop — can exceed one page, and a silently
+   * truncated list would understate the settled amount, so pages are followed until a short one.
+   */
+  async transactionEffects(hash: string, signal?: AbortSignal): Promise<HorizonEffect[]> {
+    const PAGE_LIMIT = 200
+    const MAX_PAGES = 10 // safety valve: 2000 effects is far beyond any real swap
+    const all: HorizonEffect[] = []
+    let cursor: string | undefined
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params = new URLSearchParams({ limit: String(PAGE_LIMIT) })
+      if (cursor) params.set('cursor', cursor)
+      const res = await this.fetch(
+        `/transactions/${encodeURIComponent(hash)}/effects?${params.toString()}`,
+        { method: 'GET', signal },
+        this.config.requestTimeoutMs
+      )
+      if (!res.ok) {
+        if (res.status === 404) break
+        throw new StellarSwapError('server_error', `Horizon /effects failed (${res.status})`, { status: res.status })
+      }
+      const body = (await res.json().catch(() => ({}))) as { _embedded?: { records?: HorizonEffect[] } }
+      const records = body._embedded?.records ?? []
+      all.push(...records)
+      if (records.length < PAGE_LIMIT) break
+      cursor = records[records.length - 1]?.paging_token
+      if (!cursor) break
+    }
+    return all
   }
 
   /**

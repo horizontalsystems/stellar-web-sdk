@@ -1,8 +1,8 @@
 /**
- * Route discovery, the provider fan-out, and the pieces of the adapters that are pure logic.
- * Dependency-free and offline: the fan-out is exercised with stub adapters so the timing and
+ * Route discovery, the fan-out, the solver, route construction and config resolution.
+ * Dependency-free and offline: the fan-out is exercised with stub adapters so its timing and
  * error-normalization behaviour is asserted deterministically rather than against live venues.
- * Live coverage lives in `bench/` and `test/live.mjs`.
+ * The adapters themselves are covered in `adapters.test.mjs`, tracking in `tracking.test.mjs`.
  */
 
 import {
@@ -22,7 +22,12 @@ import {
   makeRoute,
   selectRoute,
   selectUnifiedRoute,
-  PROVIDER_REGISTRY
+  bestByExpected,
+  PROVIDER_REGISTRY,
+  StellarSwapSDK,
+  makeSignedTxExecution,
+  makeStellarBrokerExecution,
+  makeTransferExecution
 } from '../dist/index.js'
 
 let pass = 0
@@ -120,24 +125,44 @@ console.log('\n# fan-out')
   ok('non-ProviderQuoteError normalizes', toProviderError('X', new Error('boom')).error === 'boom')
 }
 
-console.log('\n# waterfall solver')
+console.log('\n# route selection')
 {
-  const r = (provider, expected) =>
+  const r = (provider, expected, minBuyAmount) =>
     makeRoute({
       provider, sellAsset: 'XLM.XLM', sellAmount: '100', buyAsset: USDC,
-      expectedBuyAmount: expected, fees: [], estimatedTime: { inbound: 0, swap: 6, outbound: 0, total: 6 }
+      expectedBuyAmount: expected, ...(minBuyAmount ? { minBuyAmount } : {}),
+      fees: [], estimatedTime: { inbound: 0, swap: 6, outbound: 0, total: 6 }
     })
 
-  // The documented policy: StellarBroker wins even when a fallback shows a higher number.
+  // The policy: most output wins, with no provider preferred. This is the assertion that pins the
+  // removal of the old StellarBroker-first rule — under it, SB would win this set.
   const picked = selectRoute([r('SOROSWAP', '105'), r('STELLARBROKER', '100'), r('STELLAR_DEX', '103')])
-  ok('SB wins over a nominally better fallback', picked.providers[0] === 'STELLARBROKER')
+  ok('the best-priced route wins, not StellarBroker', picked.providers[0] === 'SOROSWAP')
 
-  const noBroker = selectRoute([r('SOROSWAP', '105'), r('STELLAR_DEX', '103')])
-  ok('without SB, best expected wins', noBroker.providers[0] === 'SOROSWAP')
+  // ...and SB is not penalised either — it wins when it genuinely quotes the most.
+  const sbBest = selectRoute([r('SOROSWAP', '100'), r('STELLARBROKER', '106'), r('STELLAR_DEX', '103')])
+  ok('StellarBroker wins when it actually quotes the most', sbBest.providers[0] === 'STELLARBROKER')
 
-  // The second, broader preference: any Stellar in-chain route beats any cross-chain one.
+  ok('order does not matter', selectRoute([r('STELLARBROKER', '100'), r('SOROSWAP', '105')]).providers[0] === 'SOROSWAP')
+  ok('a single route is picked', selectRoute([r('AQUARIUS', '1')]).providers[0] === 'AQUARIUS')
+  ok('no routes → undefined', selectRoute([]) === undefined)
+
+  // Amounts are compared as decimal strings, so precision beyond a float survives.
+  const precise = selectRoute([r('SOROSWAP', '16.3576019'), r('STELLAR_DEX', '16.3576020')])
+  ok('compares at full decimal precision', precise.providers[0] === 'STELLAR_DEX')
+  ok('ties keep the first route (stable)', selectRoute([r('AQUARIUS', '10'), r('SOROSWAP', '10')]).providers[0] === 'AQUARIUS')
+
+  // The documented escape hatch for a caller who wants a guaranteed floor rather than the highest
+  // estimate: SB's minBuyAmount is null, so filtering on it drops the unenforced route.
+  const mixed = [r('STELLARBROKER', '106'), r('SOROSWAP', '105', '104'), r('STELLAR_DEX', '103', '102')]
+  ok('filtering on an enforced floor excludes StellarBroker',
+    bestByExpected(mixed.filter((x) => x.minBuyAmount !== null)).providers[0] === 'SOROSWAP')
+
+  // The remaining preference is about settlement, not price: in-chain beats cross-chain.
   const unified = selectUnifiedRoute([r('NEAR', '200'), r('STELLAR_DEX', '100')])
   ok('Stellar in-chain beats a better cross-chain route', unified.providers[0] === 'STELLAR_DEX')
+  ok('best in-chain route still wins within the group',
+    selectUnifiedRoute([r('NEAR', '200'), r('STELLAR_DEX', '100'), r('SOROSWAP', '101')]).providers[0] === 'SOROSWAP')
   ok('cross-chain wins when Stellar cannot serve', selectUnifiedRoute([r('NEAR', '200')]).providers[0] === 'NEAR')
   ok('no routes → undefined', selectUnifiedRoute([]) === undefined)
 }
@@ -196,6 +221,135 @@ console.log('\n# Axelar ITS')
   })
   ok('selector matches keccak preimage', got.startsWith(INTERCHAIN_TRANSFER_SELECTOR))
   ok('encoding matches the viem reference vector', got === expected)
+}
+
+console.log('\n# no backend')
+{
+  // The SDK must construct and be fully usable with no configuration at all — no base URL, no
+  // API key, nothing to point at. This is the whole claim of the package, so it is asserted.
+  const sdk = new StellarSwapSDK()
+  ok('constructs with no config', !!sdk.router && !!sdk.horizon)
+  ok('no server fields on the resolved config',
+    !('apiBaseUrl' in sdk.config) && !('apiKey' in sdk.config) && !('routing' in sdk.config))
+  ok('horizon defaults to public SDF', sdk.config.horizonUrl === 'https://horizon.stellar.org')
+  ok('every registered provider is reachable', PROVIDER_REGISTRY.every((p) => typeof p.getQuote === 'function'))
+
+  // Tracking by uuid is a convenience over an in-memory registry; an unknown one must say so
+  // clearly rather than silently returning an empty status.
+  let threw
+  try { await sdk.track('nope-not-a-uuid') } catch (e) { threw = e }
+  ok('track() on an unknown uuid explains itself', !!threw && /in-memory/.test(threw.message))
+}
+
+console.log('\n# route construction')
+{
+  const base = {
+    provider: 'SOROSWAP', sellAsset: 'XLM.XLM', sellAmount: '100', buyAsset: USDC,
+    expectedBuyAmount: '16.35', fees: [], estimatedTime: { inbound: 0, swap: 6, outbound: 0, total: 6 }
+  }
+
+  // An absent floor is an explicit null, so "no guaranteed minimum" stays distinguishable from
+  // "this client version doesn't know the field".
+  ok('omitted minBuyAmount becomes explicit null', makeRoute(base).minBuyAmount === null)
+  ok('a real floor is carried through', makeRoute({ ...base, minBuyAmount: '16' }).minBuyAmount === '16')
+  // Optional fields are omitted rather than set undefined, so a serialized route stays clean.
+  ok('optional fields are omitted, not undefined-valued',
+    !('expiresAt' in makeRoute(base)) && !('execution' in makeRoute(base)) && !('tracking' in makeRoute(base)))
+  ok('providers is a list carrying the one provider', makeRoute(base).providers.length === 1)
+
+  const signed = makeSignedTxExecution({ chain: 'XLM', xdr: 'AAAA' })
+  ok('signed_transaction tags its transaction kind', signed.transactions[0].kind === 'stellar')
+
+  const session = makeStellarBrokerExecution({
+    chain: 'XLM', sellingAsset: 'XLM', buyingAsset: 'USDC-G', sellingAmount: '100', slippageTolerance: 0.01
+  })
+  ok('a broker session carries no transaction', session.transactions === undefined)
+  ok('broker slippage stays a fraction', session.slippageTolerance === 0.01)
+  ok('an absent partner key is omitted', !('partnerKey' in session))
+
+  const transfer = makeTransferExecution({
+    chain: 'BTC', depositAddress: 'bc1q', amount: '1', asset: 'BTC.BTC', sourceAddress: 'bc1qme', canBuildTx: false
+  })
+  // Naming a source address signals intent to send from it; if the SDK cannot build that chain's
+  // deposit, saying so explicitly is what tells the caller to build it themselves.
+  ok('an unbuildable origin says why', transfer.unsignedTxUnavailable === 'chain_not_supported')
+  const buildable = makeTransferExecution({
+    chain: 'XLM', depositAddress: 'G', amount: '1', asset: 'XLM.XLM', sourceAddress: 'GME', canBuildTx: true
+  })
+  ok('a buildable origin carries no unavailable hint', !('unsignedTxUnavailable' in buildable))
+  const noSource = makeTransferExecution({ chain: 'BTC', depositAddress: 'bc1q', amount: '1', asset: 'BTC.BTC' })
+  ok('no source address ⇒ no hint (nothing was intended)', !('unsignedTxUnavailable' in noSource))
+}
+
+console.log('\n# config')
+{
+  const sdk = new StellarSwapSDK()
+  ok('defaults to mainnet passphrase', sdk.config.networkPassphrase.includes('Public'))
+  ok('defaults the broker WebSocket', sdk.config.brokerWsUrl === 'wss://api.stellar.broker/ws')
+  ok('defaults the request timeout', sdk.config.requestTimeoutMs === 30_000)
+  ok('tunables default to the documented values',
+    sdk.config.tunables.providerTimeoutMs === 12_000 && sdk.config.tunables.overallTimeoutMs === 15_000)
+  ok('aqua is excluded from the Soroswap venue list by default',
+    !sdk.config.tunables.soroswapProtocols.includes('aqua'))
+  ok('credentials/fees default to empty, not undefined',
+    Object.keys(sdk.config.credentials).length === 0 && Object.keys(sdk.config.serviceFees).length === 0)
+
+  const trailing = new StellarSwapSDK({ horizonUrl: 'https://h.example.com/' })
+  ok('trailing slashes are stripped from URLs', trailing.config.horizonUrl === 'https://h.example.com')
+
+  // Every upstream key is passable at construction — that is the whole configuration surface.
+  const keys = new StellarSwapSDK({
+    credentials: { soroswapApiKey: 'sk_1', stellarBrokerPartnerKey: 'pk_1', nearApiJwt: 'jwt_1' }
+  })
+  ok('soroswap key is carried', keys.config.credentials.soroswapApiKey === 'sk_1')
+  ok('broker partner key is carried', keys.config.credentials.stellarBrokerPartnerKey === 'pk_1')
+  ok('1Click jwt is carried', keys.config.credentials.nearApiJwt === 'jwt_1')
+
+  // A vendor RPC key resolves to BOTH endpoints, so a caller never hand-builds the URL.
+  const vc = new StellarSwapSDK({ validationCloud: { apiKey: 'vc_key' } })
+  ok('vendor key fills Horizon', vc.config.horizonUrl === 'https://mainnet.stellar.validationcloud.io/v1/vc_key')
+  ok('vendor key fills Soroban RPC', vc.config.endpoints.sorobanRpcUrl === 'https://mainnet.stellar.validationcloud.io/v1/vc_key')
+
+  const vcHost = new StellarSwapSDK({ validationCloud: { apiKey: 'k', host: 'https://custom.example.com/v1/' } })
+  ok('vendor host is overridable', vcHost.config.horizonUrl === 'https://custom.example.com/v1/k')
+
+  // Per-endpoint overrides compose with the vendor key rather than being replaced by it.
+  const mixed = new StellarSwapSDK({
+    validationCloud: { apiKey: 'k' },
+    horizonUrl: 'https://my-horizon.example.com'
+  })
+  ok('an explicit horizonUrl beats the vendor key', mixed.config.horizonUrl === 'https://my-horizon.example.com')
+  ok('...while Soroban still uses the vendor key',
+    mixed.config.endpoints.sorobanRpcUrl === 'https://mainnet.stellar.validationcloud.io/v1/k')
+
+  const mixed2 = new StellarSwapSDK({
+    validationCloud: { apiKey: 'k' },
+    endpoints: { sorobanRpcUrl: 'https://my-rpc.example.com' }
+  })
+  ok('an explicit sorobanRpcUrl beats the vendor key', mixed2.config.endpoints.sorobanRpcUrl === 'https://my-rpc.example.com')
+  ok('...while Horizon still uses the vendor key',
+    mixed2.config.horizonUrl === 'https://mainnet.stellar.validationcloud.io/v1/k')
+
+  // No vendor key ⇒ the public endpoints, and no phantom sorobanRpcUrl on the resolved config.
+  ok('no vendor key leaves Soroban unset (adapter default applies)',
+    new StellarSwapSDK().config.endpoints.sorobanRpcUrl === undefined)
+  ok('an empty vendor key is ignored rather than building a broken URL',
+    new StellarSwapSDK({ validationCloud: { apiKey: '' } }).config.horizonUrl === 'https://horizon.stellar.org')
+  // Other endpoint overrides must survive the merge that fills sorobanRpcUrl.
+  ok('unrelated endpoint overrides are preserved',
+    new StellarSwapSDK({ validationCloud: { apiKey: 'k' }, endpoints: { soroswapUrl: 'https://s.example.com' } })
+      .config.endpoints.soroswapUrl === 'https://s.example.com')
+
+  const overridden = new StellarSwapSDK({ tunables: { providerTimeoutMs: 500 } })
+  ok('a partial tunables override keeps the other defaults',
+    overridden.config.tunables.providerTimeoutMs === 500 && overridden.config.tunables.overallTimeoutMs === 15_000)
+
+  // The SDK calls `config.fetch(...)` as a method, so an unbound global would run with the wrong
+  // receiver and throw "Illegal invocation" in a browser.
+  ok('the default fetch is callable detached', typeof sdk.config.fetch === 'function' && (() => {
+    const f = sdk.config.fetch
+    try { f('data:,'); return true } catch { return false }
+  })())
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

@@ -23,7 +23,7 @@ import { Account, Address, Asset, Networks, Operation, TransactionBuilder, nativ
 import { isStellarAccountId, parseStellarAssetIdentifier } from '../../core/assets.js'
 import { formatUnits, fromStroops, normalizeStellarAmount, toStroops } from '../../core/amounts.js'
 import { EvmSignedTx, Fee, Route } from '../../core/types.js'
-import { makeRoute, replaceInboundFee } from '../../routing/route.js'
+import { makeRoute, replaceInboundFee, trackingAxelar } from '../../routing/route.js'
 import { stellarPreflight } from '../../stellar/preflight.js'
 import { httpJson, providerError } from '../http.js'
 import { ProviderContext, ProviderQuoteRequest } from '../types.js'
@@ -205,7 +205,16 @@ export async function getQuote(
     estimatedTime,
     // The Stellar envelope carries its own timebounds; an EVM transaction has no expiry of its own.
     ...(stellarSell ? { expiresAt: Date.now() + TX_TIMEOUT_SECONDS * 1000 } : {}),
-    execution
+    execution,
+    tracking: trackingAxelar({
+      fromAsset: sell.entry.identifier,
+      toAsset: buy.entry.identifier,
+      toAddress: request.destinationAddress,
+      fromChain: sell.entry.chain,
+      toChain: buy.entry.chain,
+      fromAddress: request.sourceAddress,
+      fromAmount: sellAmount
+    })
   })
 }
 

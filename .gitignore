@@ -5,5 +5,9 @@ dist/
 .idea/
 *.log
 
+# internal spec/handoff docs — not published
+docs/
+docs-dont-commit-and-dont-ref/
+
 # secrets
 .env

@@ -1,11 +1,11 @@
 # Architecture — what runs where
 
 This document answers one question precisely: **which components of the Stellar integration live in
-this open repository, and which remain in the hosted `uswap-server`.**
+this open repository.**
 
-Short answer: as of the client-side adapter port, every component involved in *discovering,
-pricing, selecting and executing* a swap runs in this package and is readable here. The hosted
-server retains only post-trade tracking, and is optional.
+Short answer: **all of them.** Every component involved in discovering, pricing, selecting,
+executing and tracking a swap runs in this package and is readable here. The SDK talks to the swap
+providers directly and has no backend of any kind.
 
 ## The pipeline, component by component
 
@@ -16,13 +16,12 @@ server retains only post-trade tracking, and is optional.
 | 3 | **Quote normalization** — venue response → canonical amounts, fees, floors | **This repo** | each adapter |
 | 4 | **Route construction** — the `Route` + `execution` block | **This repo** | [`src/routing/route.ts`](src/routing/route.ts) |
 | 5 | **Route discovery / provider fan-out** | **This repo** | [`registry.ts`](src/routing/registry.ts), [`fanout.ts`](src/routing/fanout.ts) |
-| 6 | **Routing / solver logic** — the waterfall | **This repo** | [`src/core/waterfall.ts`](src/core/waterfall.ts) |
+| 6 | **Routing / solver logic** — route selection | **This repo** | [`src/core/selection.ts`](src/core/selection.ts) |
 | 7 | **Developer-facing SDK** | **This repo** | [`src/StellarSwapSDK.ts`](src/StellarSwapSDK.ts), [`src/react`](src/react) |
 | 8 | **Execution** — signing, submission, the broker session | **This repo** | [`src/execution`](src/execution) |
-| 9 | **Swap tracking** — post-trade outcome reconciliation | Hosted `uswap-server` | `POST /v2/track` |
+| 9 | **Outcome tracking** — settled amounts, read from the chain | **This repo** | [`src/tracking`](src/tracking) |
 
-Components 1–8 have no dependency on `uswap-server`. Component 9 is the only one that does, and it
-is optional — see [Tracking](#tracking-the-one-hosted-piece) below.
+Nothing in this pipeline depends on a hosted service.
 
 ## The six provider adapters
 
@@ -54,22 +53,14 @@ they are the difference between an adapter and a proxy:
   outbid the direct order book at quote time and then evaporate before ledger inclusion. The
   adapter prefers the fewest-hop path within a tolerance of the best price.
 
-## Routing modes
+## Construction
 
 ```ts
-new StellarSwapSDK({ routing: 'local' })    // default — adapters in this package
-new StellarSwapSDK({ routing: 'server', apiBaseUrl, apiKey })  // price via /v2 instead
+const sdk = new StellarSwapSDK()   // no arguments required
 ```
 
-`'local'` is the default and needs no server. Every upstream host serves CORS-enabled responses
-(verified across all six), so it works in a browser as well as in Node.
-
-`'server'` remains supported. It is the right choice when you want provider API keys kept off the
-client entirely, or when you want the hosted deployment's fee configuration to apply.
-
-Both modes produce the same `Route` shape and run the same waterfall, so switching between them
-changes nothing downstream. See [`BENCHMARKS.md`](BENCHMARKS.md) for a measured pricing-parity
-comparison between the two.
+Every upstream host serves CORS-enabled responses (verified across all six), so the whole stack runs
+in a browser as well as in Node.
 
 ## Credentials in a browser
 
@@ -83,33 +74,44 @@ in a browser bundle is public by construction. The SDK does not pretend otherwis
 Without a Soroswap key the adapter declines with a clear per-provider error and the other three
 Stellar providers still serve the pair.
 
-## Tracking: the one hosted piece
+## Tracking
 
-`POST /v2/track` reconciles a swap's outcome on Horizon after the fact. That is a server's job —
-it means watching a chain over minutes, after the page that submitted the swap may be gone — and
-this SDK does not replicate it. `sdk.track()` throws a clear configuration error when no server is
-set.
+Each provider is followed wherever its truth actually lives:
 
-Local routing is not blind without it. A `signed_transaction` route's outcome is known the moment
-Horizon returns from the submit, because that call blocks until ledger inclusion — the result is on
-`ExecutionResult.submit`. A StellarBroker session reports its own settled amounts. Only cross-chain
-routes, whose far side settles minutes later, genuinely benefit from server-side tracking.
+| Provider | Followed via | Keyed by |
+|---|---|---|
+| STELLARBROKER / SOROSWAP / AQUARIUS / STELLAR_DEX | Horizon transaction + effects | transaction hash |
+| NEAR | 1Click `GET /v0/status` | deposit address (+ memo) |
+| AXELAR_ITS | Axelarscan GMP `searchGMP` | source-chain hash, across two hub hops |
 
-There is one known limitation, inherited and unchanged: StellarBroker splits large orders across
-several transactions in a single ledger, and `/v2/track` accepts only one hash — so the tracked
-amount for a split SB fill is a **lower bound**, not the full fill. The session result carries the
-true totals.
+The settled amount is always **read**, never taken on trust: for a Stellar swap it is summed from
+the recipient's `account_credited` effects in the buy asset, which works uniformly across classic
+path payments and Soroban SAC transfers. A successful transaction that decodes no matching credit
+reports completion *without* an amount rather than a false zero.
+
+What a committed route carries for this is a `tracking` handle built by the adapter that produced
+it — the identifiers its venue is keyed by. That handle travels on the route, so tracking needs no
+stored record anywhere: `sdk.track(route, hash)` is enough. A `uuid` also works for a route
+committed by the same SDK instance, but that registry is in-memory; persist the route to survive a
+reload.
+
+The one thing a server does that a page cannot is keep polling after the page is gone. For a
+cross-chain route settling minutes later, persist the handle and resume on the next visit.
+
+One known limitation, inherited and unchanged: StellarBroker may split a large order across several
+transactions in one ledger, and a single reported hash covers only that transaction's share — so a
+split fill's tracked amount is a **lower bound**. The session result carries the true totals.
 
 ## What was deliberately not ported
 
-Three things in `uswap-server` sit next to the funded components but are not part of them. They are
-hosting policy — none of them changes which route wins or what a route pays out:
+Three things sat next to the funded components in the server but are not part of them:
 
-- **Fee resolution from a database.** The server reads per-user fee rows and a register of verified
-  fee wallets. Client-side this is plain configuration (`serviceFees`), defaulting to no fee. The
-  fee *math* — each venue's mechanism, the gross/net split conventions — is ported in full.
+- **Fee resolution from a database.** The server read per-user fee rows and a register of verified
+  fee wallets. Here this is plain configuration (`serviceFees`), defaulting to no fee. The fee
+  *math* — each venue's mechanism, the gross/net split conventions — is ported in full.
 - **Sanction haircuts, analytics rows, Prometheus counters, swap records, affiliate splits,
-  provider suspension flags.** Operational concerns of running a hosted service.
+  provider suspension flags.** Operational concerns of running a hosted service, none of which
+  changes which route wins or what it pays out.
 - **Deposit transaction building for non-Stellar chains.** The server builds deposit transactions
   for the twenty-odd origin chains NEAR supports. That is wallet work on other chains, outside a
   Stellar SDK's remit; a committed NEAR route returns the full deposit instruction and the

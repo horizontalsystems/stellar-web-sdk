@@ -66,7 +66,6 @@ const config = {
   WebSocket: MockWebSocket,
   horizonUrl: 'https://horizon.stellar.org',
   fetch: globalThis.fetch,
-  apiBaseUrl: 'x',
   apiKey: 'x',
   requestTimeoutMs: 30000
 }

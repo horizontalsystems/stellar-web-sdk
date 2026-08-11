@@ -4,7 +4,7 @@
  * This is the client-side counterpart of `uswap-server/src/api/quote/registry.ts` plus the pair
  * classification the SDK previously delegated to the server. Discovery is deliberately separate
  * from both the fan-out (`fanout.ts`, which runs the chosen adapters) and the solver
- * (`../core/waterfall.ts`, which ranks the routes they return): asking the wrong set of providers
+ * (`../core/selection.ts`, which ranks the routes they return): asking the wrong set of providers
  * and ranking their answers badly are different failures, and keeping them apart is what makes
  * each one testable on its own.
  */

@@ -1,16 +1,15 @@
 /**
  * The local routing stack, assembled: discovery → fan-out → solver.
  *
- * This is the piece that makes the SDK self-sufficient. `quote()` here does what
- * `POST /v2/rate` does on the hosted server — classify the pair, ask every eligible provider in
- * parallel, and hand the routes to the waterfall — and `commit()` does what `POST /v2/swap` does,
- * running exactly one provider with `dry: false` so it builds the executable route.
+ * This is the piece that makes the SDK self-sufficient. `quote()` classifies the pair, asks every
+ * eligible provider in parallel, and ranks the routes; `commit()` runs exactly one
+ * provider with `dry: false` so it builds the executable route.
  */
 
 import { ResolvedConfig } from '../core/config.js'
 import { StellarSwapError } from '../core/errors.js'
 import { CommittedRoute, ProviderError, Route, TokenInfo } from '../core/types.js'
-import { selectUnifiedRoute } from '../core/waterfall.js'
+import { selectUnifiedRoute } from '../core/selection.js'
 import { ProviderContext, ProviderQuoteRequest } from '../providers/types.js'
 import { getCatalog } from '../providers/near/index.js'
 import { HorizonClient } from '../stellar/horizon.js'
@@ -42,7 +41,7 @@ export class LocalRouter {
     }
   }
 
-  /** Price a pair across every eligible provider and apply the waterfall. Read-only. */
+  /** Price a pair across every eligible provider and pick the best route. Read-only. */
   async quote(
     request: Omit<ProviderQuoteRequest, 'dry'> & { providers?: string[] },
     signal?: AbortSignal
@@ -76,8 +75,8 @@ export class LocalRouter {
   }
 
   /**
-   * Commit against ONE provider — the counterpart of `/v2/swap`. The provider is named by the
-   * caller (normally the waterfall's pick) so the committed quote matches the price that was shown.
+   * Commit against ONE provider, named by the caller (normally the picked route's) so the
+   * committed quote matches the price that was shown.
    *
    * A locally committed route carries a client-minted `uuid`. It is a correlation handle for the
    * caller's own records, not a server-side order id: there is no order to create, because every

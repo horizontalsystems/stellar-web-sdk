@@ -10,14 +10,15 @@
  *
  * `minBuyAmount` stays null on purpose. The committed numbers are a snapshot: the broker re-quotes
  * live in-session within `slippageTolerance`, so there is no client-verifiable on-chain floor to
- * promise. This is the one Stellar provider whose output is genuinely an estimate, which is also
- * why the waterfall treats its number the way it does (see `src/core/waterfall.ts`).
+ * promise. This is the one Stellar provider whose output is genuinely an estimate — route selection
+ * still ranks it on `expectedBuyAmount` like any other, so a caller who needs a guaranteed floor
+ * should filter on `minBuyAmount` (see `src/core/selection.ts`).
  */
 
 import { parseStellarAssetIdentifier, stellarAssetId } from '../../core/assets.js'
 import { normalizeStellarAmount } from '../../core/amounts.js'
 import { Fee, Route } from '../../core/types.js'
-import { makeRoute, makeStellarBrokerExecution } from '../../routing/route.js'
+import { makeRoute, makeStellarBrokerExecution, trackingStellar } from '../../routing/route.js'
 import { stellarPreflight } from '../../stellar/preflight.js'
 import { httpJson, providerError } from '../http.js'
 import { ProviderContext, ProviderQuoteRequest } from '../types.js'
@@ -76,7 +77,7 @@ export async function getQuote(
     // Hard gate on commit: without a partner key the broker's WebSocket accepts the connection
     // and then silently drops it, so a keyless committed quote would die on an opaque timeout
     // AFTER the user confirmed — the worst possible moment. Declining here instead keeps SB out
-    // of the committed path entirely and lets the waterfall fall through to a working provider.
+    // of the committed path entirely and lets selection fall through to a working provider.
     if (!partnerKey) {
       throw providerError(
         PROVIDER,
@@ -157,6 +158,14 @@ export async function getQuote(
       sellingAmount,
       slippageTolerance,
       partnerKey
+    }),
+    tracking: trackingStellar({
+      provider: PROVIDER,
+      fromAsset: sellAsset.identifier,
+      toAsset: buyAsset.identifier,
+      toAddress: request.sourceAddress!,
+      fromAddress: request.sourceAddress!,
+      fromAmount: sellingAmount
     })
   })
 }

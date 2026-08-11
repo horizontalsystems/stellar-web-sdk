@@ -7,7 +7,11 @@ const results = $('results')
 
 let lastQuote // QuoteResult from the most recent quote (carries provider + crossChain flag)
 
-const sdk = () => createSdk({ apiBaseUrl: $('apiBaseUrl').value.trim(), apiKey: $('apiKey').value.trim() })
+const sdk = () =>
+  createSdk({
+    soroswapApiKey: $('soroswapApiKey')?.value.trim(),
+    stellarBrokerPartnerKey: $('brokerPartnerKey')?.value.trim()
+  })
 const signer = () => createSigner($('secretKey').value)
 const sourceAddress = () => signer()?.publicKey || $('source').value.trim()
 const destination = () => $('destination').value.trim()
@@ -161,14 +165,14 @@ async function runSwap() {
       const d = exec.deposit
       const memo = d.attachment ? ` · memo (${d.attachment.type}) <b>${d.attachment.value}</b>` : ''
       live.className = 'note ok'
-      live.innerHTML = `Committed <code>${route.uuid}</code>. Send <b>${d.amount} ${d.asset}</b> on <b>${d.chain}</b> to <b>${d.depositAddress}</b>${memo}, then track by uuid.`
+      live.innerHTML = `Committed <code>${route.uuid}</code>. Send <b>${d.amount} ${d.asset}</b> on <b>${d.chain}</b> to <b>${d.depositAddress}</b>${memo}, then track it.`
       return
     }
 
     note(results, 'ok', `Submitted via ${exec.method}. Tracking hash: ${exec.inboundTxHash ?? '—'}`)
     if (exec.inboundTxHash) {
       const status = note(results, 'info', 'Tracking…')
-      const final = await client.pollTrack(route.uuid, exec.inboundTxHash, {
+      const final = await client.pollTrack(route, exec.inboundTxHash, {
         intervalMs: 5_000,
         onUpdate: (st) => (status.innerHTML = `Status: <b>${st.status}</b> (polling…)`)
       })

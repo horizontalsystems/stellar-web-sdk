@@ -72,7 +72,7 @@ export class SigningPipeline {
     this.sellingSac = sacContractId(opts.sellingAsset, opts.networkPassphrase)
   }
 
-  /** The last outer fee-bump hash — report this to `/v2/track`. Undefined if nothing signed yet. */
+  /** The last outer fee-bump hash — track by this one. Undefined if nothing signed yet. */
   get lastSignedHash(): string | undefined {
     return this.signedHashes[this.signedHashes.length - 1]
   }

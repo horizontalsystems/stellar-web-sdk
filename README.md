@@ -1,8 +1,9 @@
 # stellar-web-sdk
 
-Web SDK for Stellar swaps against **uswap-server**. It aggregates six swap sources — four
-Stellar-native providers plus **NEAR** and **Axelar ITS** for cross-chain routes — behind one API
-and runs execution **client-side**:
+A self-contained web SDK for Stellar swaps. It aggregates six swap sources — four Stellar-native
+providers plus **NEAR** and **Axelar ITS** for cross-chain routes — behind one API, and talks to
+every one of them **directly**. There is no backend: no server to deploy, none to point at, and no
+SDK API key to obtain.
 
 | Provider | Execution | `minBuyAmount` | Third-party recipient |
 |---|---|---|---|
@@ -14,19 +15,40 @@ and runs execution **client-side**:
 | **AXELAR_ITS** (cross-chain) | signed transaction | enforced (1:1 bridge) | yes |
 
 **The SDK ships the provider adapters themselves.** Quote fetching, quote normalization, route
-construction, route discovery, the provider fan-out and the routing solver all run in this package —
-`src/providers/` holds one adapter per venue, `src/routing/` holds discovery and the fan-out, and
-`src/core/waterfall.ts` holds the selection policy. The SDK talks to StellarBroker, Soroswap,
-Aquarius, Horizon, 1Click and Axelar directly. No hosted service sits in the pricing path.
+construction, route discovery, the provider fan-out, the routing solver and outcome tracking all run
+in this package — `src/providers/` holds one adapter per venue, `src/routing/` holds discovery and
+the fan-out, `src/core/selection.ts` holds the selection policy, and `src/tracking/` follows a swap
+to its outcome. The SDK talks to StellarBroker, Soroswap, Aquarius, Horizon, 1Click and Axelar
+directly.
 
 ```ts
-new StellarSwapSDK({ routing: 'local' })   // default — this package's adapters, no server needed
-new StellarSwapSDK({ routing: 'server', apiBaseUrl, apiKey })   // price via uswap-server /v2 instead
+const sdk = new StellarSwapSDK()   // that's it — nothing is required
 ```
 
-Every upstream serves CORS-enabled responses, so local routing works in a browser as well as in
-Node. Two upstreams take an API key (Soroswap; 1Click optionally) — pass them via `credentials`
-server-side, or leave them unset and point `config.fetch` at your own proxy for a public web app.
+Every upstream serves CORS-enabled responses, so this works in a browser as well as in Node.
+
+The only keys that exist belong to upstream services, and all of them are passed to the
+constructor:
+
+```ts
+const sdk = new StellarSwapSDK({
+  credentials: {
+    soroswapApiKey: '…',            // required for Soroswap routes; others serve the pair without it
+    stellarBrokerPartnerKey: '…',   // required to COMMIT a StellarBroker session
+    nearApiJwt: '…'                 // optional — raises 1Click's rate limit
+  },
+  // Optional commercial Horizon + Soroban RPC. One key, both endpoints — the public Stellar
+  // endpoints are rate-limited enough to drop routes under a real fan-out.
+  validationCloud: { apiKey: '…' }
+})
+```
+
+Endpoint precedence for Horizon and Soroban RPC alike: an explicit `horizonUrl` /
+`endpoints.sorobanRpcUrl` wins, then `validationCloud`, then the public host — so you can route one
+through a vendor and the other elsewhere.
+
+In a trusted environment pass the keys directly. For a public web app leave `credentials` unset and
+point `config.fetch` at your own proxy, since anything passed here reaches the browser bundle.
 
 Execution is client-side too:
 
@@ -40,11 +62,13 @@ Execution is client-side too:
 - **NEAR** — a deposit to an address; the SDK builds Stellar-origin deposits and returns the
   instruction for any other origin chain.
 
-The one thing local routing does **not** replace is post-trade **tracking** (`/v2/track`), which
-reconciles outcomes on Horizon after the fact. Configure `apiBaseUrl` + `apiKey` to use it in either
-routing mode. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full component map of what runs
-where, and [`BENCHMARKS.md`](BENCHMARKS.md) for measured routing performance and a pricing-parity
-comparison against the hosted server.
+Tracking follows the same rule — each provider is read wherever its truth actually lives: Horizon
+for the Stellar-native providers, 1Click's status endpoint for NEAR, the Axelarscan GMP API for
+Axelar ITS. `sdk.track(route, hash)` returns the settled amounts read from the chain, never a
+claimed figure.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the component map and [`BENCHMARKS.md`](BENCHMARKS.md)
+for measured routing performance.
 
 ## Install
 
@@ -60,22 +84,21 @@ Runtime requirements: `fetch` (Node 18+/browser) and, for StellarBroker sessions
 ```ts
 import { StellarSwapSDK, keypairSigner } from 'stellar-web-sdk'
 
+// Nothing is required. Both credentials below belong to the upstream venues and are optional:
+// without the Soroswap key that one provider declines and the rest still serve the pair; the
+// broker key is only needed to COMMIT a StellarBroker route.
 const sdk = new StellarSwapSDK({
-  // routing: 'local' is the default — the SDK's own adapters price every route.
   credentials: {
-    soroswapApiKey: process.env.SOROSWAP_API_KEY,               // required for Soroswap routes
-    stellarBrokerPartnerKey: process.env.SB_PARTNER_KEY         // required to COMMIT an SB route
-  },
-  // Optional: a uswap-server for post-trade tracking (sdk.track()).
-  apiBaseUrl: 'https://swap-dev.unstoppable.money/api',
-  apiKey: process.env.USWAP_API_KEY,
+    soroswapApiKey: process.env.SOROSWAP_API_KEY,
+    stellarBrokerPartnerKey: process.env.SB_PARTNER_KEY
+  }
   // horizonUrl defaults to https://horizon.stellar.org; networkPassphrase defaults to PUBLIC
 })
 
 const trader = 'GTRADER…'
 const signer = keypairSigner(process.env.STELLAR_SECRET!) // or your own StellarSigner (see below)
 
-// 1) Quote — fans out to the right providers and applies the SB-first waterfall.
+// 1) Quote — fans out to the right providers and picks the best-priced route.
 const quote = await sdk.quote({
   sellAsset: 'XLM.XLM',
   buyAsset: 'XLM.USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN',
@@ -98,7 +121,7 @@ const route = await sdk.commit({
   sellAmount: '100',
   slippage: 1,
   sourceAddress: trader,
-  provider: quote.provider!, // carry the waterfall's pick so price matches
+  provider: quote.provider!, // carry the picked provider so the price matches
 })
 
 // 4) Execute (dispatches on execution.method) and track — one call.
@@ -111,7 +134,7 @@ const { execution, track } = await sdk.executeAndTrack(route, signer, {
 console.log('tracking hash', execution.inboundTxHash, 'status', track?.status)
 
 // 5) Poll to completion.
-const final = await sdk.pollTrack(route.uuid, execution.inboundTxHash, {
+const final = await sdk.pollTrack(route, execution.inboundTxHash, {
   onUpdate: (s) => console.log(s.status),
 })
 ```
@@ -131,7 +154,7 @@ import { StellarSwapProvider, useQuote, useExecuteSwap } from 'stellar-web-sdk/r
 import { keypairSigner } from 'stellar-web-sdk'
 
 // Give the provider a STABLE config (module const / useMemo) or a prebuilt `sdk` instance.
-const config = { apiBaseUrl: '/api/uswap', apiKey: '…' }
+const config = { credentials: { soroswapApiKey: '…' } }
 
 function App() {
   return (
@@ -166,13 +189,13 @@ function Swap() {
 ```
 
 Hooks: `useStellarSwap()` (the SDK from context), `useQuote()`, `useExecuteSwap()`, and
-`useTrackStatus(uuid, hash?, opts?)` for standalone polling. `useQuote`/`useExecuteSwap` drop
+`useTrackStatus(route, hash?, opts?)` for standalone polling. `useQuote`/`useExecuteSwap` drop
 superseded/aborted results, so rapid re-quoting never flashes a stale price.
 
-> **Keep your API key server-side.** A `NEXT_PUBLIC_` key ships to the browser. In production point
-> `apiBaseUrl` at a Next.js route handler that injects `X-API-Key` and proxies uswap-server (StellarBroker
-> WebSocket sessions still run directly from the browser). A runnable App Router example — including that
-> proxy pattern — is in [`examples/nextjs`](examples/nextjs).
+> **Keep provider keys server-side.** A `NEXT_PUBLIC_` key ships to the browser. In production
+> leave `credentials` unset and pass a `fetch` that routes provider calls through a Next.js route
+> handler which attaches them server-side (StellarBroker WebSocket sessions still run directly from
+> the browser). A runnable App Router example is in [`examples/nextjs`](examples/nextjs).
 
 Build the React entry with `npm run build:all` (or `build:react`); the default `npm run build` only
 emits the framework-agnostic core, so it stays green without React installed.
@@ -183,43 +206,57 @@ including the key-proxy pattern).
 
 ## Route selection policy
 
-`sdk.quote()` fans out across the eligible providers and then applies **two preference rules**.
-Both deliberately override raw price, so both are stated here in full — see
-[`src/core/waterfall.ts`](src/core/waterfall.ts) for the implementation.
+`sdk.quote()` fans out across the eligible providers and then picks **the route that returns the
+most** — the greatest `expectedBuyAmount`. No provider is preferred over another. See
+[`src/core/selection.ts`](src/core/selection.ts) for the implementation.
 
-### Rule 1 — the StellarBroker-first waterfall (`selectRoute`)
+Every adapter reports `expectedBuyAmount` already net of the fees taken out of the traded amount,
+so the figures are directly comparable and the largest one is the best quote on offer. Amounts are
+compared as decimal strings, so no amount passes through a float.
 
-1. If a `STELLARBROKER` route exists → **pick it, even when a fallback quotes a higher
-   `expectedBuyAmount`.**
-2. Else → the fallback with the greatest `expectedBuyAmount`.
-3. Nothing → no route.
+> **Changed from an earlier policy.** This SDK previously ran a *StellarBroker-first waterfall*: if
+> a `STELLARBROKER` route existed it was selected even when another provider quoted more, on the
+> reasoning that SB's figure was a conservative estimate that usually beat the alternatives after
+> execution. That reasoning was not verifiable from a quote, so the preference has been removed.
+> StellarBroker now wins when — and only when — it quotes the most.
 
-**What this means in practice:** the SDK will select a StellarBroker route that shows a *lower*
-number than a Soroswap, Aquarius or Stellar DEX route quoted at the same moment. The rationale is
-that SB's figure is an estimate rather than an enforced floor — the broker re-quotes live during
-the session, within the slippage tolerance — and in practice it settles above its estimate. This
-is the reason `minBuyAmount` is `null` on every StellarBroker route: there is no on-chain floor to
-promise, whereas every other Stellar provider's floor is enforced by the transaction itself.
+### The one caveat: an estimate is not a floor
 
-That trade — a possibly-lower shown number against no enforced minimum — is a policy choice, not
-an optimization. If it is not the trade you want, `selectRoute` and `bestByExpected` are both
-exported, and `quote()` returns every route in `allRoutes`, so you can rank them yourself:
+`expectedBuyAmount` is the right basis for comparison but it is not a promise, and the routes are
+not equally certain:
+
+| Provider | `minBuyAmount` |
+|---|---|
+| SOROSWAP / AQUARIUS / STELLAR_DEX | enforced on-chain — the transaction fails rather than under-deliver |
+| AXELAR_ITS | 1:1 and deterministic |
+| NEAR | contractual |
+| **STELLARBROKER** | **`null`** — the broker re-quotes live in-session, so there is no client-verifiable floor |
+
+Two routes quoting the same amount therefore carry different guarantees. If you would rather have a
+guaranteed floor than the highest estimate, filter before ranking — `quote()` returns every route
+in `allRoutes`, and the selection helpers are exported:
 
 ```ts
 import { bestByExpected } from 'stellar-web-sdk'
+
 const q = await sdk.quote({ … })
-const bestPriced = bestByExpected(q.allRoutes)   // ignore the SB preference entirely
+const guaranteed = bestByExpected(q.allRoutes.filter((r) => r.minBuyAmount !== null))
 ```
 
-### Rule 2 — Stellar in-chain over cross-chain (`selectUnifiedRoute`)
+Network fees are excluded from the comparison: they are additive, paid in XLM rather than the buy
+asset, and differ between a classic path payment and a Soroban invoke. They appear as `inbound`
+lines on `route.fees`.
 
-When a pair can be served both in-chain and cross-chain, **any Stellar in-chain route wins over any
-cross-chain route, regardless of quoted output.** Rule 1 then picks among the Stellar routes. Only
-when no Stellar provider can serve the pair does the best cross-chain route win.
+### Stellar in-chain over cross-chain (`selectUnifiedRoute`)
 
-The rationale is settlement, not price: an in-chain swap settles in one ledger (~5s) with an
-enforced floor, while a cross-chain route settles in minutes across a bridge with its own failure
-and refund modes.
+One preference does remain, and it is about **settlement rather than price**: when a pair can be
+served both ways, a Stellar in-chain route wins over a cross-chain one regardless of quoted output.
+An in-chain swap settles in a single ledger (~5s) against an enforced floor, while a cross-chain
+route settles over minutes across a bridge with its own failure and refund modes — different
+products, not competing quotes. Within each group, the best `expectedBuyAmount` still wins.
+
+In practice this rarely arbitrates anything, since route discovery already sends a Stellar-native
+pair only to the Stellar providers. It matters mainly if you override the provider set by hand.
 
 ### Recipient restriction
 
@@ -233,7 +270,7 @@ a preference.
 `quote()`/`commit()`/`execute()` handle every path in one flow, routed **automatically from the
 assets**:
 
-- **Stellar-native** pair (both assets Stellar) → the four Stellar in-chain providers (SB-first waterfall).
+- **Stellar-native** pair (both assets Stellar) → the four Stellar in-chain providers; best price wins.
 - **Axelar ITS** pair — the same token bridged Stellar ↔ Ethereum (`XLM.XLM`↔`ETH.XLM-0x…`, `SHX`↔`SHX`)
   → the **AXELAR_ITS** provider (a signed Stellar tx, so the normal `execute()` signs & submits it).
 - any other **cross-chain** pair → the **NEAR** provider (1Click), deposit-to-address.
@@ -292,7 +329,7 @@ implement the two members with your device's raw-signing primitive.
 
 Execution is a **direct** connection: from the committed route's session parameters the SDK opens
 `wss://api.stellar.broker/ws?partner=<key>` and drives the trade against the broker itself
-(uswap-server is not in this path). The broker builds every transaction and submits it — the client
+(nothing else is in this path). The broker builds every transaction and submits it — the client
 only signs. Because the SDK is signing broker-authored transactions over a direct link, the signing
 pipeline (`SigningPipeline`) is the client's only defense; it runs on **every** `tx` message, in
 order:
@@ -316,10 +353,10 @@ before rethrowing.
 
 ## API surface
 
-- `new StellarSwapSDK(config)` — `routing` (`'local'` default / `'server'`), `credentials`,
-  `endpoints`, `tunables`, `serviceFees`, optional `apiBaseUrl` + `apiKey` (required for
-  `'server'` routing and for tracking), `horizonUrl`, `networkPassphrase`, `brokerWsUrl`, `fetch`,
-  `WebSocket`, `requestTimeoutMs`.
+- `new StellarSwapSDK(config?)` — every field is optional: `credentials` (`soroswapApiKey`,
+  `stellarBrokerPartnerKey`, `nearApiJwt`), `validationCloud`, `endpoints`, `tunables`,
+  `serviceFees`, `horizonUrl`, `networkPassphrase`, `brokerWsUrl`, `fetch`, `WebSocket`,
+  `requestTimeoutMs`.
 - `quote(params)` → `{ route?, provider?, crossChain, allRoutes, providerErrors, timings }`
 - `crossChainTokens(provider?)` → the cross-chain asset catalog (`'NEAR'` default, or `'AXELAR_ITS'`)
 - `checkTrustline(recipient, buyAsset)` / `activateTrustline(signer, asset, limit?)`
@@ -329,7 +366,8 @@ before rethrowing.
   cross-chain route, which returns `result.deposit` instead of submitting)
 - `depositFor(route)` → the cross-chain deposit instruction without submitting
 - `executeAndTrack(route, signer, opts?)` → `{ execution, track? }`
-- `track(uuid, inboundTxHash?)` / `pollTrack(uuid, inboundTxHash, opts?)`
+- `track(route, inboundTxHash?)` / `pollTrack(route, inboundTxHash, opts?)` — reads Horizon /
+  1Click / Axelarscan directly; also accepts a `uuid` for a route committed by this instance
 
 The routing stack is exported piece by piece, so each component can be inspected, tested or
 replaced without going through the SDK facade:
@@ -340,11 +378,12 @@ replaced without going through the SDK facade:
 - **Fan-out** — `runFanout`, `toProviderError`, `LocalRouter`
 - **Route construction** — `makeRoute`, `makeSignedTxExecution`, `makeStellarBrokerExecution`,
   `makeTransferExecution`
-- **Solver** — `selectRoute`, `selectUnifiedRoute`, `bestByExpected`, `providersForRecipient`
+- **Selection** — `selectRoute`, `selectUnifiedRoute`, `bestByExpected`, `providersForRecipient`
 - **Adapter internals** — `pickBestPath` (STELLAR_DEX path robustness), `stellarPreflight`,
   `encodeInterchainTransfer`, `findAxelarEntry`, `fetchNearTokens`
 
-Plus the execution and utility building blocks: `UswapClient`, `TrustlineManager`, `HorizonClient`,
+Plus the tracking and execution building blocks: `trackRoute`, `trackStellar`, `trackNear`,
+`trackAxelar`, `sumEffects`, `TrustlineManager`, `HorizonClient`,
 `SignedTransactionExecutor`, `TransferExecutor`, `StellarBrokerSession`, `SigningPipeline`, and all
 asset/amount utilities.
 
@@ -357,7 +396,6 @@ asset/amount utilities.
 - `/v2` `slippage` is a **percent**; the broker's `slippageTolerance` is a **fraction** — the
   server-provided execution params are used verbatim, never converted.
 - Amounts are truncated (not rounded) to the 7-dp stroop grid.
-- `destinationAddress` is sent to `/v2/swap` even when it equals the source.
 
 ## Project structure
 
@@ -372,7 +410,7 @@ src/
     amounts.ts          stroop math (7-dp truncation)
     assets.ts           asset parsing, SB/Horizon forms, SAC derivation
     signer.ts           StellarSigner interface + keypair signer + sig helpers
-    waterfall.ts        route selection policy (SB-first + in-chain preference)
+    selection.ts        route selection: best expectedBuyAmount, in-chain preferred
   providers/            THE PROVIDER ADAPTERS — quote fetching + normalization
     types.ts            adapter contract, error codes, context, tunables
     http.ts             the one fetch path every adapter uses
@@ -387,8 +425,10 @@ src/
     fanout.ts           parallel fan-out with two-level time budgets
     route.ts            Route + execution-block construction
     LocalRouter.ts      discovery → fan-out → solver, assembled
-  client/
-    UswapClient.ts      typed REST wrapper for /v2 (routing: 'server' + tracking)
+  tracking/             outcome tracking, per provider
+    stellar.ts          Horizon transaction + effects → settled amounts
+    near.ts             1Click status → three-leg cross-chain progress
+    axelar.ts           Axelarscan GMP → two hub hops
   stellar/              on-chain interaction
     horizon.ts          Horizon submit, account reads, path-finding
     trustline.ts        trustline detection + changeTrust
