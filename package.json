@@ -20,6 +20,8 @@
   "files": [
     "dist",
     "README.md",
+    "ARCHITECTURE.md",
+    "BENCHMARKS.md",
     "LICENSE"
   ],
   "scripts": {
@@ -30,7 +32,8 @@
     "typecheck:react": "tsc -p tsconfig.react.json --noEmit",
     "test": "npm run build && node test/run.mjs",
     "clean": "rm -rf dist",
-    "bench": "npm run build && node bench/routing.mjs"
+    "bench": "npm run build && node bench/routing.mjs",
+    "prepublishOnly": "npm run clean && npm run build:all && node test/run.mjs"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.3.0"
