@@ -72,9 +72,17 @@ for measured routing performance.
 
 ## Install
 
+The package is **not yet published to npm**. Install it from the repository:
+
 ```sh
-npm install stellar-web-sdk @stellar/stellar-sdk
+npm install github:horizontalsystems/stellar-web-sdk @stellar/stellar-sdk
 ```
+
+The SDK compiles from source on install, so this gives you the same `dist/` — both the main entry
+and `stellar-web-sdk/react` — that a published tarball would carry. Nothing else is required.
+
+Once the package is published, the install becomes `npm install stellar-web-sdk` with no other
+change; the import paths are identical either way.
 
 Runtime requirements: `fetch` (Node 18+/browser) and, for StellarBroker sessions, `WebSocket`
 (Node 22+/browser). Both can be injected via config for older runtimes.

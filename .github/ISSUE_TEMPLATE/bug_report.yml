@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in the SDK behaves incorrectly or throws
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste API keys. Name the key that was involved and the error you saw instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        The smallest snippet that shows it. The SDK has no backend, so a repro is usually a
+        constructor call plus one method call.
+      render: ts
+      placeholder: |
+        const sdk = new StellarSwapSDK()
+        const q = await sdk.quote({ ... })
+    validations:
+      required: true
+
+  - type: input
+    id: pair
+    attributes:
+      label: Pair and amount
+      description: Routing behaviour is pair-specific, so this matters more than it looks.
+      placeholder: "100 XLM.XLM → XLM.USDC-GA5ZSE…"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: providers
+    attributes:
+      label: Provider(s) involved
+      multiple: true
+      options:
+        - STELLARBROKER
+        - SOROSWAP
+        - AQUARIUS
+        - STELLAR_DEX
+        - NEAR
+        - AXELAR_ITS
+        - "Not provider-specific / don't know"
+    validations:
+      required: true
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Full error
+      description: "`StellarSwapError` carries a `code` and usually a `provider` — please include both."
+      render: text
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Does it reproduce?
+      description: Quotes move with live liquidity, so a one-off and a consistent failure are investigated differently.
+      options:
+        - Every time
+        - Intermittently
+        - Saw it once
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Node 22.3 / Chrome 127 / Next.js 15, SDK installed from github:… or npm@version"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Before filing
+      options:
+        - label: I read the "Things worth knowing before you report them" section of CONTRIBUTING.md
+          required: true
+        - label: "`npm test` passes on my clone (or I've said below that it doesn't)"

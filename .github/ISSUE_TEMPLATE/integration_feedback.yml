@@ -1,0 +1,67 @@
+name: Integration feedback
+description: The API was confusing, undocumented, or awkward — even if nothing was broken
+labels: ["integration-feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is not a lesser category than a bug. An API that behaves correctly and is still hard to
+        adopt has a real defect, and it is the kind we are least able to see from the inside.
+
+        Please report the thing that cost you time even if you eventually worked it out.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to build
+      description: One or two sentences on the integration, so we can judge whether the SDK's shape fits it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: friction
+    attributes:
+      label: Where you lost time
+      description: >
+        The specific step. "I could not tell whether `minBuyAmount: null` meant no floor or no data"
+        is far more useful than "the docs could be clearer".
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      multiple: true
+      options:
+        - Install / build
+        - Constructing the SDK, config, credentials
+        - Quoting and reading routes
+        - Choosing a route / selection behaviour
+        - Committing and executing
+        - StellarBroker WebSocket sessions
+        - Tracking a swap to its outcome
+        - React hooks
+        - TypeScript types
+        - Documentation (README / ARCHITECTURE / BENCHMARKS)
+        - Examples
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: What shape would have matched your assumption? Guesses are welcome — the wrong guess is the data.
+
+  - type: input
+    id: time-lost
+    attributes:
+      label: Roughly how long did it cost you
+      placeholder: "10 minutes / half a day / never resolved it"
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: How you got past it (if you did)
+      description: If you gave up, say so plainly — that is the strongest signal in this form.

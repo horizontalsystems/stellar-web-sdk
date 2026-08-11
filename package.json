@@ -28,6 +28,7 @@
     "build": "tsc -p tsconfig.json",
     "build:react": "tsc -p tsconfig.react.json",
     "build:all": "npm run build && npm run build:react",
+    "prepare": "npm run build:all",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:react": "tsc -p tsconfig.react.json --noEmit",
     "test": "npm run build && node test/run.mjs",
