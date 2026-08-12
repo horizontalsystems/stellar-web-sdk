@@ -2,7 +2,7 @@
  * AXELAR_ITS adapter — Interchain Token Service bridging between Stellar and Ethereum for the
  * classic-Stellar ITS assets (see `config.ts`).
  *
- * Ported from `uswap-server/src/providers/axelar/`. This is a BRIDGE, not a swap: both sides are
+ * This is a BRIDGE, not a swap: both sides are
  * the same token at 7 decimals, so `expectedBuyAmount` equals `sellAmount` exactly and
  * `minBuyAmount` equals it too — the mint/unlock is deterministic and slippage is inapplicable.
  * Routes therefore only ever appear for a same-asset, cross-chain pair.

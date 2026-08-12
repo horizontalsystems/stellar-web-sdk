@@ -11,13 +11,17 @@ npm install
 npm run build:all
 
 cd examples/nextjs
-cp .env.local.example .env.local   # fill in your uswap-server base + key
 npm install
 npm run dev                        # http://localhost:3000
 ```
 
 > `stellar-web-sdk` is linked via `file:../..`, so `npm run build:all` at the root must run first
 > (it emits `dist/react`).
+
+No configuration is required — the SDK needs no backend and quotes without any key. Optional
+provider keys are read from the **repository-root `.env`** and mapped onto `NEXT_PUBLIC_*` in
+`next.config.mjs`, so all three examples share one file. See `.env.local.example` for the
+per-example alternative.
 
 ## Structure
 
@@ -39,7 +43,7 @@ src/
 
 `src/components/Swap.tsx` runs the full swap lifecycle:
 
-1. `useQuote()` prices the waterfall and picks a provider.
+1. `useQuote()` fans out to every eligible provider and picks the best `expectedBuyAmount`.
 2. `sdk.checkTrustline()` / `sdk.activateTrustline()` gate the buy asset — buying a classic asset
    the trader doesn't yet trust fails on-chain, so an **Activate trustline** button appears when needed.
 3. `useExecuteSwap()` runs commit → execute → track, surfacing live StellarBroker session state
@@ -55,7 +59,7 @@ which is why `providers.tsx` and `Swap.tsx` carry `'use client'`.
 The SDK is **mainnet only** — StellarBroker has no testnet — so completing a swap moves real funds.
 To exercise the Swap button end-to-end you need a funded Stellar mainnet account:
 
-1. Set a valid `NEXT_PUBLIC_USWAP_API_KEY` in `.env.local` and restart `npm run dev`.
+1. Optionally set provider keys (see above) and restart `npm run dev`.
 2. Paste the **secret key** of a *dedicated, low-balance* account into the form. It's wrapped as a
    `keypairSigner` and stays in your browser — it is never sent to a server. (The SDK's `StellarSigner`
    is a raw ed25519 signer; browser wallet extensions like Freighter don't expose raw-hash signing, so
@@ -63,25 +67,36 @@ To exercise the Swap button end-to-end you need a funded Stellar mainnet account
 3. Quote → activate the trustline if prompted → Swap. The result panel shows the tracking hash and
    polls the status to completion.
 
-Quoting works without a signer (a dry price check), so you can try the pricing waterfall with no key.
+Quoting works without a signer (a dry price check), so you can try the pricing with no key at all.
 
-## Production note — keep the API key server-side
+## Production note — keep provider keys server-side
 
-This demo reads the uswap-server key from `NEXT_PUBLIC_USWAP_API_KEY`, which ships to the browser.
-For a real app, don't expose it. Add a route handler that injects the key and proxies uswap-server:
+This demo passes the keys in via `NEXT_PUBLIC_` vars, which ship to the browser. That is fine for a
+local demo and wrong for production: a key in a bundle is public by construction.
+
+For a real app, leave `credentials` unset and give the SDK a `fetch` that routes upstream calls
+through a route handler which attaches the keys server-side:
 
 ```ts
-// app/api/uswap/[...path]/route.ts
+// app/api/venue/[...path]/route.ts
 export async function POST(req: Request, { params }: { params: { path: string[] } }) {
-  const url = `${process.env.USWAP_API_BASE_URL}/${params.path.join('/')}`
-  return fetch(url, {
+  return fetch(`https://api.soroswap.finance/${params.path.join('/')}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': process.env.USWAP_API_KEY! },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.SOROSWAP_API_KEY!}`
+    },
     body: await req.text()
   })
 }
 ```
 
-Then point the SDK at your own origin — `apiBaseUrl: '/api/uswap'` — and drop the `NEXT_PUBLIC_`
-key entirely. (StellarBroker sessions still run directly from the browser over WebSocket; only the
-REST calls go through the proxy.)
+```ts
+const config = {
+  // no `credentials` in the browser bundle
+  fetch: (url, init) => globalThis.fetch(rewriteToProxy(url), init)
+}
+```
+
+StellarBroker sessions still run directly from the browser over WebSocket; only the REST calls go
+through the proxy.

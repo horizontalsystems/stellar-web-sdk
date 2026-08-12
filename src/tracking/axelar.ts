@@ -1,6 +1,5 @@
 /**
  * Outcome tracking for an Axelar ITS transfer, against the Axelarscan GMP API.
- * Ported from `uswap-server/src/providers/axelar/AxelarTracker.ts`.
  *
  * Stellar ITS runs in HUB mode, so one user transfer produces TWO GMP records: source → Axelar
  * (hop 1), then Axelar → destination (hop 2). Searching by the user's source transaction hash

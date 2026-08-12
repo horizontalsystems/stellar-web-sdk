@@ -3,10 +3,9 @@
  * one API). `POST /quote` prices the route; a committed quote passes the WHOLE quote object back
  * into `POST /quote/build`, which returns an unsigned envelope the client signs and broadcasts.
  *
- * Ported from `uswap-server/src/providers/soroswap/`. Two pieces of defensive logic below are the
- * reason this adapter is not a thin proxy over the aggregator, and both were added after live
- * mispricings: the `aqua` venue exclusion and the `otherAmountThreshold` clamp. They are kept
- * verbatim because they change which route selection sees.
+ * Two pieces of defensive logic below are the reason this adapter is not a thin proxy over the
+ * aggregator: the `aqua` venue exclusion and the `otherAmountThreshold` clamp. Both correct live
+ * mispricings, and both change which route selection sees.
  *
  * Authentication: every Soroswap swap endpoint requires a `sk_…` bearer key (403 without one)
  * despite their OpenAPI marking them public.

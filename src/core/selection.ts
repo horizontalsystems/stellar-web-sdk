@@ -20,11 +20,6 @@ export function routeProvider(route: Route): string | undefined {
  * the fees that come out of the traded amount, so the figures are directly comparable and the
  * largest one is the best quote on offer.
  *
- * This replaced an earlier StellarBroker-first rule, which selected a StellarBroker route even when
- * another provider quoted more, on the reasoning that SB's number was a conservative estimate. That
- * reasoning was never verifiable from a quote — see the caveat below — so it is gone: selection is
- * now decided by the numbers the providers actually publish.
- *
  * **Caveat worth knowing.** `expectedBuyAmount` is the right basis for comparison but not a
  * promise. STELLARBROKER's figure is an estimate with `minBuyAmount === null` — the broker
  * re-quotes live during its session — whereas every other Stellar provider's floor is enforced
@@ -52,10 +47,9 @@ export function selectRoute(routes: Route[]): Route | undefined {
  * in-chain route whenever one exists, and fall back to the best cross-chain route only when no
  * Stellar provider can serve the pair.
  *
- * This preference is about SETTLEMENT, not price, which is why it survives while the price-based
- * one did not: an in-chain swap settles in a single ledger (~5s) against an enforced floor, while a
- * cross-chain route settles over minutes across a bridge with its own failure and refund modes.
- * Those are different products, not competing quotes.
+ * This preference is about SETTLEMENT, not price: an in-chain swap settles in a single ledger
+ * (~5s) against an enforced floor, while a cross-chain route settles over minutes across a bridge
+ * with its own failure and refund modes. Those are different products, not competing quotes.
  *
  * In practice it rarely arbitrates anything — route discovery already sends a Stellar-native pair
  * only to the Stellar providers — so it matters mainly when a caller overrides the provider set by

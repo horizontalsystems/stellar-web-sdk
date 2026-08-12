@@ -2,11 +2,8 @@
  * The provider fan-out — run every discovered adapter in parallel under a time budget, and
  * normalize what comes back into routes plus per-provider errors.
  *
- * Ported from `uswap-server/src/api/quote/runQuotes.ts`, minus the hosting concerns that lived
- * alongside it there (Prometheus counters, an analytics table, sanction haircuts, provider
- * suspension flags). What remains is the part that decides what a caller sees: the two-level time
- * budget, the abort cascade, the local declines that never spend an upstream call, and the error
- * normalization.
+ * What lives here is only what decides what a caller sees: the two-level time budget, the abort
+ * cascade, the local declines that never spend an upstream call, and the error normalization.
  *
  * The budget is two-level on purpose. Each provider gets its own allowance so one slow venue
  * cannot consume the whole quote, and the fan-out gets an overall allowance so the *sum* of

@@ -67,8 +67,7 @@
     "aquarius",
     "soroban",
     "axelar",
-    "near-intents",
-    "uswap"
+    "near-intents"
   ],
   "repository": {
     "type": "git",

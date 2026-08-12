@@ -6,10 +6,9 @@
  * `src/routing/registry.ts`, the parallel fan-out in `src/routing/fanout.ts`, and the
  * route-selection policy in `src/core/selection.ts`.
  *
- * Ported from `uswap-server/src/providers/*` and `src/api/quote/*`. The server-only concerns —
- * the `UserFee` table, sanction haircuts, analytics rows, swap records, affiliate splits,
- * provider suspension flags — are deliberately NOT ported: they are hosting policy, not swap
- * routing, and none of them change which route wins or what it pays out.
+ * An adapter's remit stops at the route. Hosting policy — per-user fee tables, sanction
+ * haircuts, analytics, swap records, affiliate splits, provider suspension flags — is deliberately
+ * outside this contract: none of it changes which route wins or what it pays out.
  */
 
 import { ResolvedConfig } from '../core/config.js'

@@ -1,6 +1,5 @@
 /**
  * AXELAR_ITS static catalog — the assets we bridge, and the chain-name encodings the route needs.
- * Ported from `uswap-server/src/providers/axelar/AxelarConfig.ts`.
  *
  * ITS is same-token bridging (1:1, no pricing): an asset here exists on several chains under ONE
  * ITS token id, and a transfer burns or locks on the source and mints or unlocks on the

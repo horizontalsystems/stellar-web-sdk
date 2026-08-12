@@ -72,17 +72,16 @@ for measured routing performance.
 
 ## Install
 
-The package is **not yet published to npm**. Install it from the repository:
+```sh
+npm install stellar-web-sdk @stellar/stellar-sdk
+```
+
+To track unreleased changes, install straight from the repository instead — it compiles from source
+on install and yields the same `dist/`, with identical import paths:
 
 ```sh
 npm install github:horizontalsystems/stellar-web-sdk @stellar/stellar-sdk
 ```
-
-The SDK compiles from source on install, so this gives you the same `dist/` — both the main entry
-and `stellar-web-sdk/react` — that a published tarball would carry. Nothing else is required.
-
-Once the package is published, the install becomes `npm install stellar-web-sdk` with no other
-change; the import paths are identical either way.
 
 Runtime requirements: `fetch` (Node 18+/browser) and, for StellarBroker sessions, `WebSocket`
 (Node 22+/browser). Both can be injected via config for older runtimes.
@@ -222,12 +221,6 @@ Every adapter reports `expectedBuyAmount` already net of the fees taken out of t
 so the figures are directly comparable and the largest one is the best quote on offer. Amounts are
 compared as decimal strings, so no amount passes through a float.
 
-> **Changed from an earlier policy.** This SDK previously ran a *StellarBroker-first waterfall*: if
-> a `STELLARBROKER` route existed it was selected even when another provider quoted more, on the
-> reasoning that SB's figure was a conservative estimate that usually beat the alternatives after
-> execution. That reasoning was not verifiable from a quote, so the preference has been removed.
-> StellarBroker now wins when — and only when — it quotes the most.
-
 ### The one caveat: an estimate is not a floor
 
 `expectedBuyAmount` is the right basis for comparison but it is not a promise, and the routes are
@@ -352,8 +345,8 @@ order:
    tx-count only, **never cumulative** — SB rebuilds retries on different channel accounts, so a
    cumulative ceiling would kill legitimate retries.
 4. **Sign** — classic: fee-bump with `feeSource = trader`; Soroban first pass: sign each auth entry
-   (`signatureExpirationLedger = maxLedger + 1`) + the inner tx, no fee-bump (the server round-trips
-   it); Soroban second pass: only wrap + sign the fee-bump.
+   (`signatureExpirationLedger = maxLedger + 1`) + the inner tx, no fee-bump (the broker
+   round-trips it); Soroban second pass: only wrap + sign the fee-bump.
 
 On any failure **after** a signature, the session still returns the last signed fee-bump hash so the
 swap can be tracked — a partial fill may already have moved value. `executeAndTrack` reports it
@@ -401,8 +394,8 @@ asset/amount utilities.
   else does).
 - Every `ping` is answered with `pong{uid}`, including while waiting for `connected`/`quote`.
 - Asset codes are **case-sensitive** end to end — never normalized.
-- `/v2` `slippage` is a **percent**; the broker's `slippageTolerance` is a **fraction** — the
-  server-provided execution params are used verbatim, never converted.
+- The request's `slippage` is a **percent**; the broker's `slippageTolerance` is a **fraction** —
+  the committed execution params are used verbatim, never converted.
 - Amounts are truncated (not rounded) to the 7-dp stroop grid.
 
 ## Project structure
@@ -412,7 +405,7 @@ src/
   index.ts              public entry — re-exports the SDK surface
   StellarSwapSDK.ts     top-level orchestrator (quote → commit → execute → track)
   core/                 dependency-light primitives
-    types.ts            wire types for the /v2 contract
+    types.ts            public wire types (Route, quote/commit shapes)
     errors.ts           StellarSwapError + error codes
     config.ts           config resolution / defaults
     amounts.ts          stroop math (7-dp truncation)

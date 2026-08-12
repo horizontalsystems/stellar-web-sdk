@@ -1,6 +1,5 @@
 /**
  * Outcome tracking for the four Stellar-native providers, against Horizon.
- * Ported from `uswap-server/src/providers/stellar/StellarTracker.ts`.
  *
  * The swap is one Stellar transaction whose hash the caller reports after broadcasting (for
  * StellarBroker, the fee-bump hash the session surfaces). The realized output is summed from that

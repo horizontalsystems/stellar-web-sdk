@@ -14,7 +14,7 @@ export interface StellarAsset {
   code: string
   /** Issuer account (`G…`). Absent for native XLM. */
   issuer?: string
-  /** Canonical uswap identifier, e.g. `XLM.XLM` or `XLM.USDC-GA5ZSE…`. */
+  /** Canonical SDK identifier, e.g. `XLM.XLM` or `XLM.USDC-GA5ZSE…`. */
   identifier: string
 }
 
@@ -42,7 +42,7 @@ function isNativeCode(code: string): boolean {
 /**
  * Parse a Stellar asset identifier into `{ code, issuer, identifier }`. Accepts:
  *   `XLM.XLM`                          → native
- *   `XLM.CODE-GISSUER…`                → classic (uswap canonical)
+ *   `XLM.CODE-GISSUER…`                → classic (SDK canonical)
  *   `CODE-GISSUER…`                    → classic (chain-less)
  *   `CODE:ISSUER`                      → classic (Horizon form)
  *   `XLM`                              → native (bare)

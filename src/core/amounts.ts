@@ -1,7 +1,6 @@
 /**
- * Stellar amount math. Classic assets and native XLM are all 7-decimal fixed-point
- * ("stroops"). Ported from `uswap-server/src/toolboxes/stellar.ts` so the amount the SDK
- * puts on the wire matches exactly what the server truncates to.
+ * Stellar amount math. Classic assets and native XLM are all 7-decimal fixed-point ("stroops"),
+ * and every amount the SDK puts on the wire is truncated to that grid here.
  */
 
 import { StellarSwapError } from './errors.js'
@@ -72,7 +71,7 @@ export function formatUnits(value: bigint, decimals: number): string {
 /**
  * `stroops × (1 − slippage%)`, floored to a stroop — the enforced-minimum math every Stellar
  * provider adapter derives its floor from. `slippagePercent` is the request's percent form
- * (0.5 = 0.5%), matching the `/v2` contract.
+ * (0.5 = 0.5%).
  */
 export function floorAfterSlippage(stroops: bigint, slippagePercent: number): bigint {
   const bps = BigInt(Math.round(slippagePercent * 100))

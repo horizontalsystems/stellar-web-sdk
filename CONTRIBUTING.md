@@ -15,10 +15,12 @@ npm test           # 65 offline tests, no network, no credentials
 `npm test` needs nothing from you — no keys, no network, no running service. If it fails on a clean
 clone, that alone is a complete bug report.
 
-To consume the SDK from another project before it is on npm:
+To consume the SDK from another project, install the release from npm — or install from the
+repository to pick up changes that are not released yet:
 
 ```sh
-npm install github:horizontalsystems/stellar-web-sdk @stellar/stellar-sdk
+npm install stellar-web-sdk @stellar/stellar-sdk                      # released
+npm install github:horizontalsystems/stellar-web-sdk @stellar/stellar-sdk   # unreleased
 ```
 
 ## Credentials

@@ -25,10 +25,9 @@ Nothing in this pipeline depends on a hosted service.
 
 ## The six provider adapters
 
-Each is a plain `getQuote(request, context, signal) => Promise<Route>` function. All were ported
-from `uswap-server/src/providers/`, keeping the venue-specific corrections that were learned in
-production — those corrections are the substance of the integration, and they are documented inline
-at the point where each applies.
+Each is a plain `getQuote(request, context, signal) => Promise<Route>` function. Each also carries
+the venue-specific corrections that production use demands — those corrections are the substance of
+the integration, and they are documented inline at the point where each applies.
 
 | Provider | Upstream | Execution | Enforced floor | Notable adapter logic |
 |---|---|---|---|---|
@@ -69,7 +68,8 @@ in a browser bundle is public by construction. The SDK does not pretend otherwis
 
 - **Server-side / trusted environments** — pass keys via `credentials`.
 - **Public web apps** — leave `credentials` unset and point `config.fetch` at your own proxy, which
-  attaches keys server-side. [`examples/nextjs`](examples/nextjs) demonstrates this.
+  attaches keys server-side. [`examples/nextjs`](examples/nextjs) uses the demo-only `NEXT_PUBLIC_`
+  form and spells out the route handler to replace it with.
 
 Without a Soroswap key the adapter declines with a clear per-provider error and the other three
 Stellar providers still serve the pair.
@@ -98,31 +98,30 @@ reload.
 The one thing a server does that a page cannot is keep polling after the page is gone. For a
 cross-chain route settling minutes later, persist the handle and resume on the next visit.
 
-One known limitation, inherited and unchanged: StellarBroker may split a large order across several
+One known limitation: StellarBroker may split a large order across several
 transactions in one ledger, and a single reported hash covers only that transaction's share — so a
 split fill's tracked amount is a **lower bound**. The session result carries the true totals.
 
-## What was deliberately not ported
+## Scope — what this SDK does not do
 
-Three things sat next to the funded components in the server but are not part of them:
+Three things sit just outside the boundary:
 
-- **Fee resolution from a database.** The server read per-user fee rows and a register of verified
-  fee wallets. Here this is plain configuration (`serviceFees`), defaulting to no fee. The fee
-  *math* — each venue's mechanism, the gross/net split conventions — is ported in full.
-- **Sanction haircuts, analytics rows, Prometheus counters, swap records, affiliate splits,
-  provider suspension flags.** Operational concerns of running a hosted service, none of which
-  changes which route wins or what it pays out.
-- **Deposit transaction building for non-Stellar chains.** The server builds deposit transactions
-  for the twenty-odd origin chains NEAR supports. That is wallet work on other chains, outside a
-  Stellar SDK's remit; a committed NEAR route returns the full deposit instruction and the
-  connected wallet sends it. Stellar-origin deposits *are* built here.
+- **Fee resolution from a database.** Service fees are plain configuration (`serviceFees`),
+  defaulting to no fee. The fee *math* — each venue's mechanism, the gross/net split conventions —
+  is implemented in full; only the question of *whose* fee applies is left to the caller.
+- **Operational concerns of running a hosted service** — sanction haircuts, analytics, metrics
+  counters, swap records, affiliate splits, provider suspension flags. None of them changes which
+  route wins or what it pays out, and a library is the wrong place for them.
+- **Deposit transaction building for non-Stellar chains.** A committed NEAR route returns the full
+  deposit instruction and the connected wallet sends it, because building that transaction for the
+  twenty-odd origin chains NEAR supports is wallet work on those chains rather than a Stellar SDK's
+  remit. Stellar-origin deposits *are* built here.
 
 ## Package dependencies
 
 One runtime dependency: `@stellar/stellar-sdk`. React is an optional peer.
 
-The server's provider layer uses `axios`, `viem`, `ethers`, `@defuse-protocol/one-click-sdk`,
-`sequelize` and an internal `uswap` package. None were carried over — the adapters use `fetch`, the
-1Click REST contract directly, and a [~60-line ABI encoder](src/providers/axelar/abi.ts) for the
-single EVM call Axelar needs, asserted against a viem-generated reference vector in
-[`test/routing.test.mjs`](test/routing.test.mjs).
+That is deliberate, and it is why there is no HTTP client, no EVM library and no vendor SDK here:
+the adapters use `fetch`, speak the 1Click REST contract directly, and rely on a
+[~60-line ABI encoder](src/providers/axelar/abi.ts) for the single EVM call Axelar needs — asserted
+against a viem-generated reference vector in [`test/routing.test.mjs`](test/routing.test.mjs).

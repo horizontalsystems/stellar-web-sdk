@@ -1,20 +1,15 @@
 /**
  * NEAR adapter — cross-chain swaps over NEAR Intents' 1Click API.
  *
- * Ported from `uswap-server/src/providers/near/NearProvider.ts`, with two deliberate departures
- * that make it a client-side adapter rather than a copy:
+ * It speaks 1Click's REST contract directly rather than depending on
+ * `@defuse-protocol/one-click-sdk-typescript`, which keeps the SDK's runtime dependency set at
+ * exactly one package, and it resolves its asset catalog from 1Click's own `GET /v0/tokens`.
  *
- *  1. It speaks 1Click's REST contract directly instead of depending on
- *     `@defuse-protocol/one-click-sdk-typescript`, keeping the SDK's runtime dependency set at
- *     exactly one package.
- *  2. It resolves its asset catalog from 1Click's own `GET /v0/tokens` rather than from a synced
- *     database table. The catalog is the authority either way; the server merely cached it.
- *
- * What is NOT ported, and is not a gap: the server builds the *deposit transaction* for twenty-odd
- * origin chains (Bitcoin, EVM, Solana, …). That is wallet work on non-Stellar chains, outside this
- * SDK's remit. A committed NEAR route returns the deposit address, amount and memo — the whole
- * `transfer` execution contract — and the connected wallet sends the deposit. Stellar-origin
- * deposits, which this SDK *can* build, are handled by `src/execution/transfer.ts`.
+ * Scope: a committed NEAR route returns the deposit address, amount and memo — the whole
+ * `transfer` execution contract — and the connected wallet sends the deposit. Building the deposit
+ * transaction for a non-Stellar origin chain (Bitcoin, EVM, Solana, …) is wallet work on that
+ * chain and is outside this SDK's remit. Stellar-origin deposits, which it can build, are handled
+ * by `src/execution/transfer.ts`.
  */
 
 import { formatUnits, parseUnits } from '../../core/amounts.js'

@@ -1,6 +1,5 @@
 /**
  * Committed-quote account pre-flight, shared by every Stellar-settling adapter.
- * Ported from `uswap-server/src/providers/stellar/preflight.ts`.
  *
  * The point is to convert three failures that would otherwise surface late — mid-WebSocket
  * session, or as an on-chain revert AFTER the user has confirmed and signed — into a clean

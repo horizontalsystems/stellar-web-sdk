@@ -78,10 +78,10 @@ export class LocalRouter {
    * Commit against ONE provider, named by the caller (normally the picked route's) so the
    * committed quote matches the price that was shown.
    *
-   * A locally committed route carries a client-minted `uuid`. It is a correlation handle for the
-   * caller's own records, not a server-side order id: there is no order to create, because every
-   * one of these providers is either quoted-and-built in the same call or, in StellarBroker's case,
-   * negotiated live during the session.
+   * A locally committed route carries a client-minted `uuid`, purely as a correlation handle for
+   * the caller's own records. Nothing is registered anywhere: every one of these providers is
+   * either quoted-and-built in the same call or, in StellarBroker's case, negotiated live during
+   * the session.
    */
   async commit(
     request: ProviderQuoteRequest & { provider: string },

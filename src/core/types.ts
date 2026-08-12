@@ -227,8 +227,9 @@ export interface ProviderError {
 }
 
 /**
- * A token from `GET /v2/tokens?provider=…` — the cross-chain asset catalog. Never hand-construct
- * `identifier`s; use these. `decimals` varies per token (unlike Stellar's fixed 7).
+ * An entry in a cross-chain provider's asset catalog, as returned by `sdk.crossChainTokens()`.
+ * Never hand-construct `identifier`s; use these. `decimals` varies per token (unlike Stellar's
+ * fixed 7).
  */
 export interface TokenInfo {
   /** Canonical `CHAIN.TICKER-ADDRESS` identifier to pass as sell/buy asset. */

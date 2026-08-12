@@ -1,6 +1,5 @@
 /**
  * Outcome tracking for NEAR, against 1Click's own status endpoint.
- * Ported from `uswap-server/src/providers/near/NearTracker.ts`.
  *
  * A cross-chain swap is not one transaction, so it is reported as three legs — the deposit on the
  * origin chain, the swap on NEAR, and the payout on the destination chain — each with its own hash

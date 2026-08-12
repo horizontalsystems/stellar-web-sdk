@@ -15,9 +15,11 @@ npm install
 npm run dev            # bundles + serves at http://localhost:5173
 ```
 
-Open <http://localhost:5173>, paste your uswap-server **API key**, and click **Get quote**. To run a
-real swap, add a funded mainnet account's **secret key** (see below), then Quote → Activate trustline
-(if prompted) → Swap.
+Open <http://localhost:5173> and click **Get quote** — quoting needs no key at all. Both key fields
+are optional: a Soroswap key (`sk_…`) lets that one provider quote, and a StellarBroker partner key
+is needed only to commit an SB route. Either can also come from the repo-root `.env`. To run a real
+swap, add a funded mainnet account's **secret key** (see below), then Quote → Activate trustline (if
+prompted) → Swap.
 
 Other scripts: `npm run build` (bundle only, into `public/`), `node scripts/build.mjs --watch`
 (rebuild on change), `node scripts/serve.mjs 8080` (custom port).
@@ -47,8 +49,9 @@ terminal status.
 
 - **Mainnet only** — StellarBroker has no testnet, so a swap moves real funds. Use a dedicated,
   low-balance account; the pasted secret key is wrapped as a `keypairSigner` and stays in the page.
-  The API key is entered in the UI and only used to construct the SDK in the browser — for production,
-  proxy uswap-server through your own backend so the key stays server-side.
+  Provider keys are entered in the UI and only used to construct the SDK in the browser — for
+  production, leave `credentials` unset and point `config.fetch` at your own proxy so the keys stay
+  server-side.
 - Bundling `@stellar/stellar-sdk` for the browser needs a `Buffer` shim (`scripts/buffer-shim.js`,
   injected by esbuild). `preserveSymlinks` makes esbuild resolve deps from this example's
   `node_modules` even though `stellar-web-sdk` is linked via `file:../..`.

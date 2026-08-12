@@ -2,8 +2,7 @@
  * Route construction — assembling the normalized {@link Route} an adapter returns, plus the
  * `execution` blocks that describe how each route is carried out.
  *
- * Ported from `uswap-server/src/api/v2/quoting/native.ts`. Every adapter produces this one shape,
- * so selection, the executors, the trackers and the React hooks all consume any provider's
+ * Every adapter produces this one shape, so selection, the executors, the trackers and the React hooks all consume any provider's
  * route through the same code path.
  */
 

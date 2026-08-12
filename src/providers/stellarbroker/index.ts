@@ -2,8 +2,7 @@
  * STELLARBROKER adapter — Stellar-native multi-source router (it aggregates Soroswap, Phoenix,
  * Aquarius and the SDEX behind one quote).
  *
- * Ported from `uswap-server/src/providers/stellarbroker/`. Quoting is plain unauthenticated REST.
- * EXECUTION is what makes this provider different: there is no transaction to hand over, because
+ * Quoting is plain unauthenticated REST. EXECUTION is what makes this provider different: there is no transaction to hand over, because
  * the broker builds and submits every transaction itself over an interactive WebSocket session
  * that the CLIENT runs and signs into. A committed quote therefore returns session parameters, not
  * an envelope — see `src/execution/stellarBroker/` for the session and its signing pipeline.

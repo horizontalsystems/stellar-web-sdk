@@ -4,7 +4,7 @@
  * path-finding traverses them together; the venue split is not constrainable and is only knowable
  * after the trade.
  *
- * Ported from `uswap-server/src/providers/stellardex/`. Everything here is client-native: the
+ * Everything here is client-native: the
  * quote is a Horizon read, and a committed quote builds the `pathPaymentStrictSend` transaction
  * locally. The on-chain `destMin` makes `minBuyAmount` a genuinely enforced floor — the payment
  * fails with `op_under_dest_min` rather than under-delivering.

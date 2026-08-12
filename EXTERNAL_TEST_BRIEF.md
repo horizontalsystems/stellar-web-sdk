@@ -29,13 +29,13 @@ That makes the test's value depend almost entirely on one rule: **the tester wor
 ## Who it should be
 
 A developer who writes TypeScript and has some blockchain exposure, but who has **not** worked on
-this SDK or on `uswap-server`. Familiarity with Stellar specifically is useful but not required —
+this SDK. Familiarity with Stellar specifically is useful but not required —
 if the SDK only works for people who already know Stellar, that is worth discovering.
 
 ## Setup
 
 ```sh
-npm install github:horizontalsystems/stellar-web-sdk @stellar/stellar-sdk
+npm install stellar-web-sdk @stellar/stellar-sdk
 ```
 
 Credentials are optional for most of this. Aquarius, STELLAR_DEX and StellarBroker quote without any

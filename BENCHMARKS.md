@@ -86,25 +86,10 @@ Route selection is computationally free relative to the network. Any effort spen
 routing policy for speed would be wasted; the only thing that moves quote latency is the number and
 choice of upstream calls.
 
-## Pricing parity — a one-time verification
+## A note on service fees
 
-Not part of the harness, and not a performance measure: a check performed during the adapter port
-(2026-08-10) to confirm the ported adapters produce the *same routes* the previous server-side
-implementation did, not merely faster ones. Both paths were quoted simultaneously for 100 XLM →
-USDC:
-
-| Provider | Ported adapters | Previous server-side | Delta |
-|---|---|---|---|
-| SOROSWAP | 16.3576019 | 16.3576019 | 0.0000% |
-| STELLARBROKER | 16.3635666 | 16.3635666 | 0.0000% |
-| STELLAR_DEX | 16.3634545 | 16.3576019 | 0.0358% |
-| AQUARIUS | 16.3494113 | 16.1859171 | 1.0101% |
-
-The STELLAR_DEX delta was live order-book movement between the two calls — repeated runs put it on
-either side of zero.
-
-The Aquarius delta was **not** noise: it reproduced at exactly 1.0101% across every run, which is
-the signature of a 100 bps fee (1/0.99 − 1). The server deployment had an Aquarius service fee
-configured; this SDK's default is no fee. Setting `serviceFees: { AQUARIUS: { bps: 100, … } }`
-reproduced the other figure exactly — `16.1859171` on both sides, with identical fee lines. Fee
-configuration was the only source of divergence.
+Quotes here are measured with the default configuration, which applies **no service fee**. Setting
+one changes the quoted output by exactly that fee — a 100 bps `serviceFees: { AQUARIUS: { bps: 100,
+… } }` moves Aquarius's figure by 1.0101% (1/0.99 − 1), and the fee lines on the route show it.
+Worth knowing before comparing these numbers against another deployment's: a whole-percent gap
+between two otherwise identical quotes is usually fee configuration, not routing.

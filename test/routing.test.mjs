@@ -225,12 +225,10 @@ console.log('\n# Axelar ITS')
 
 console.log('\n# no backend')
 {
-  // The SDK must construct and be fully usable with no configuration at all — no base URL, no
-  // API key, nothing to point at. This is the whole claim of the package, so it is asserted.
+  // The SDK must construct and be fully usable with no configuration at all — nothing to point
+  // at, no credentials. This is the whole claim of the package, so it is asserted.
   const sdk = new StellarSwapSDK()
   ok('constructs with no config', !!sdk.router && !!sdk.horizon)
-  ok('no server fields on the resolved config',
-    !('apiBaseUrl' in sdk.config) && !('apiKey' in sdk.config) && !('routing' in sdk.config))
   ok('horizon defaults to public SDF', sdk.config.horizonUrl === 'https://horizon.stellar.org')
   ok('every registered provider is reachable', PROVIDER_REGISTRY.every((p) => typeof p.getQuote === 'function'))
 

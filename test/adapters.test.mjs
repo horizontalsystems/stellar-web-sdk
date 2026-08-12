@@ -4,8 +4,8 @@
  * These are the funded components — quote fetching, normalization and route construction — so the
  * assertions deliberately cover both directions: what each adapter SENDS upstream (units, asset
  * encodings, venue lists) and what it MAKES of the response (net amounts, enforced floors, fee
- * lines, error mapping). The venue-specific corrections carried over from the server are asserted
- * individually, since each of them changes which route selection sees.
+ * lines, error mapping). The venue-specific corrections are asserted individually, since each of
+ * them changes which route selection sees.
  */
 
 import { TransactionBuilder, Networks } from '@stellar/stellar-sdk'

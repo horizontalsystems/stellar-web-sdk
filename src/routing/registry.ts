@@ -1,8 +1,7 @@
 /**
  * Route discovery — which provider adapters can serve a given pair, and how to reach them.
  *
- * This is the client-side counterpart of `uswap-server/src/api/quote/registry.ts` plus the pair
- * classification the SDK previously delegated to the server. Discovery is deliberately separate
+ * Discovery covers both the provider table and pair classification, and is deliberately separate
  * from both the fan-out (`fanout.ts`, which runs the chosen adapters) and the solver
  * (`../core/selection.ts`, which ranks the routes they return): asking the wrong set of providers
  * and ranking their answers badly are different failures, and keeping them apart is what makes

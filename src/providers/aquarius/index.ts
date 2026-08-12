@@ -1,7 +1,7 @@
 /**
  * AQUARIUS adapter — the Soroban AMM (volatile + stable pools) on Stellar.
  *
- * Ported from `uswap-server/src/providers/aquarius/`. `POST /find-path/` returns a ready
+ * `POST /find-path/` returns a ready
  * `swap_chain_xdr` — which is the `swaps_chain` ARGUMENT, not a transaction. A committed quote
  * assembles the `swap_chained(user, swaps_chain, token_in, in_amount, out_min)` invocation itself,
  * simulates it over Soroban RPC (mandatory: simulation is what injects the footprint, the auth

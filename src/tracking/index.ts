@@ -3,9 +3,8 @@
  *
  * Each provider is followed wherever its truth actually lives: the four Stellar-native providers
  * against Horizon, NEAR against 1Click's status endpoint, Axelar ITS against the Axelarscan GMP
- * API. Ported from the per-provider trackers in `uswap-server`, which read exactly these same
- * public sources — the server was never a source of truth for an outcome, only a place that polled
- * them on a schedule.
+ * API. These are public sources: an outcome is always read from the chain or the venue, never
+ * from a record the SDK keeps.
  *
  * The one thing a server does that a page cannot is keep polling after the page is gone. A caller
  * that needs that — for a cross-chain route settling minutes later — should persist the route's
