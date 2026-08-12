@@ -1,6 +1,6 @@
 {
   "name": "stellar-web-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-contained Stellar swap SDK: provider adapters (StellarBroker, Soroswap, Aquarius, Stellar DEX, NEAR, Axelar ITS), quote fetching and normalization, route construction, provider fan-out and best-output route selection, with client-native execution.",
   "license": "MIT",
   "type": "module",
