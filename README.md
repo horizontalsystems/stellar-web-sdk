@@ -21,10 +21,6 @@ the fan-out, `src/core/selection.ts` holds the selection policy, and `src/tracki
 to its outcome. The SDK talks to StellarBroker, Soroswap, Aquarius, Horizon, 1Click and Axelar
 directly.
 
-```ts
-const sdk = new StellarSwapSDK()   // that's it — nothing is required
-```
-
 Every upstream serves CORS-enabled responses, so this works in a browser as well as in Node.
 
 The only keys that exist belong to upstream services, and all of them are passed to the
@@ -91,9 +87,10 @@ Runtime requirements: `fetch` (Node 18+/browser) and, for StellarBroker sessions
 ```ts
 import { StellarSwapSDK, keypairSigner } from 'stellar-web-sdk'
 
-// Nothing is required. Both credentials below belong to the upstream venues and are optional:
-// without the Soroswap key that one provider declines and the rest still serve the pair; the
-// broker key is only needed to COMMIT a StellarBroker route.
+// Both credentials belong to the upstream venues. Quoting works without either — but COMMITTING a
+// StellarBroker route requires the partner key, and StellarBroker often quotes best, so omitting
+// it will usually strand you at step 3. Without the Soroswap key that one provider declines and
+// the rest still serve the pair.
 const sdk = new StellarSwapSDK({
   credentials: {
     soroswapApiKey: process.env.SOROSWAP_API_KEY,
@@ -114,6 +111,10 @@ const quote = await sdk.quote({
   sourceAddress: trader, // destination defaults to source
 })
 if (!quote.route) throw new Error('no route')
+
+// A provider that declined is NOT in `allRoutes` — `providerErrors` is the only place that says
+// why. Check it whenever a provider you expected is missing.
+for (const e of quote.providerErrors) console.warn(e.provider, e.errorCode, e.error)
 
 // 2) Trustline gate — buying a classic asset the recipient doesn't trust is rejected on-chain.
 const trust = await sdk.checkTrustline(trader, quote.route.buyAsset)
@@ -145,6 +146,21 @@ const final = await sdk.pollTrack(route, execution.inboundTxHash, {
   onUpdate: (s) => console.log(s.status),
 })
 ```
+
+### Asset identifiers
+
+Stellar assets accept several equivalent spellings — the examples below mix them deliberately:
+
+| Form | Example |
+|---|---|
+| SDK canonical | `XLM.XLM`, `XLM.USDC-GA5Z…` |
+| chain-less | `USDC-GA5Z…` |
+| Horizon | `USDC:GA5Z…` |
+| bare native | `XLM`, `native` |
+
+All normalize to the canonical form on the returned route. Codes are **case-sensitive** and are
+never normalized. Soroban-only (`C…`) tokens are not supported. Cross-chain assets are
+`CHAIN.TICKER-ADDRESS` identifiers that must come from `crossChainTokens()` — never hand-built.
 
 ## React & Next.js
 
@@ -208,8 +224,9 @@ Build the React entry with `npm run build:all` (or `build:react`); the default `
 emits the framework-agnostic core, so it stays green without React installed.
 
 Runnable examples of the full swap flow live in [`examples/`](examples): **vanilla JS** (core SDK,
-no framework), **React** (these hooks on a plain esbuild bundle), and **Next.js** (App Router,
-including the key-proxy pattern).
+no framework), **React** (these hooks on a plain esbuild bundle), and **Next.js** (App Router; its
+README spells out the production key-proxy route handler to replace the demo's `NEXT_PUBLIC_` keys
+with).
 
 ## Route selection policy
 
@@ -351,6 +368,49 @@ order:
 On any failure **after** a signature, the session still returns the last signed fee-bump hash so the
 swap can be tracked — a partial fill may already have moved value. `executeAndTrack` reports it
 before rethrowing.
+
+## Errors
+
+Two different things fail here, and they are reported in two different ways.
+
+**A provider declining is not an error.** A quote succeeds as long as one route comes back, so a
+provider that declines is reported per-provider and its route is simply absent:
+
+```ts
+const q = await sdk.quote({ … })
+
+q.allRoutes      // only the providers that answered
+q.providerErrors // [{ provider: 'SOROSWAP',
+                 //    errorCode: 'unknownApiError',
+                 //    error: 'SOROSWAP: API key missing or invalid: Forbidden resource' }]
+```
+
+This is the designed behaviour, not a failed quote — but it means **a missing provider is explained
+only in `providerErrors`**. Reading `allRoutes` alone, a provider that declined is indistinguishable
+from one that was never asked.
+
+**Everything else throws `StellarSwapError`**, which extends `Error` and carries a `code` to branch
+on, plus optional `status` and `details`:
+
+```ts
+import { StellarSwapError } from 'stellar-web-sdk'
+
+try {
+  await sdk.commit({ …, provider: q.provider! })
+} catch (e) {
+  if (e instanceof StellarSwapError && e.code === 'invalid_params') {
+    // e.g. committing a StellarBroker route without `credentials.stellarBrokerPartnerKey`
+  }
+  throw e
+}
+```
+
+Codes: `invalid_config`, `invalid_asset`, `invalid_amount`, `invalid_params`, `no_route`,
+`recipient_not_supported`, `trustline_required`, `server_error`, `provider_error`, `rate_expired`,
+`signing_rejected`, `submit_failed`, `broker_session_error`, `broker_quote_failed`, `timeout`,
+`aborted`, `unknown`.
+
+When reporting a bug, include the `code` and the provider — see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## API surface
 
