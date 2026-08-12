@@ -71,7 +71,16 @@ export async function getQuote(
     throw providerError(PROVIDER, 'pairNotSupported', 'assets are identical', { origin: 'local' })
   }
 
+  // Every Soroswap swap endpoint rejects an unauthenticated request with 403, so decline here
+  // rather than spending an upstream round-trip on a call that cannot succeed. The fan-out reports
+  // this per-provider and the other Stellar providers still serve the pair.
   const apiKey = context.credentials.soroswapApiKey
+  if (!apiKey) {
+    throw providerError(PROVIDER, 'invalidParams', 'an API key is required — set credentials.soroswapApiKey', {
+      origin: 'local'
+    })
+  }
+
   const baseUrl = context.endpoints.soroswapUrl ?? DEFAULT_URL
   const network = context.endpoints.soroswapNetwork ?? 'mainnet'
 

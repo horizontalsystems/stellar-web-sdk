@@ -66,6 +66,16 @@ claimed figure.
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the component map and [`BENCHMARKS.md`](BENCHMARKS.md)
 for measured routing performance.
 
+## Contents
+
+- [Install](#install) · [Quick start](#quick-start) · [Asset identifiers](#asset-identifiers)
+- [React & Next.js](#react--nextjs)
+- [Route selection policy](#route-selection-policy) — including [the estimate/floor caveat](#the-one-caveat-an-estimate-is-not-a-floor) and [recipient restriction](#recipient-restriction)
+- [Unified routing (Stellar + cross-chain)](#unified-routing-stellar-in-chain--cross-chain-near)
+- [Signing](#signing--the-stellarsigner-interface) · [StellarBroker session safety](#stellarbroker-session-safety)
+- [Errors](#errors) · [API surface](#api-surface) · [Gotchas](#gotchas-honored-by-this-sdk)
+- [Project structure](#project-structure) · [Development](#development)
+
 ## Install
 
 ```sh

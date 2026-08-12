@@ -45,7 +45,7 @@ function isNativeCode(code: string): boolean {
  *   `XLM.CODE-GISSUER…`                → classic (SDK canonical)
  *   `CODE-GISSUER…`                    → classic (chain-less)
  *   `CODE:ISSUER`                      → classic (Horizon form)
- *   `XLM`                              → native (bare)
+ *   `XLM` / `native`                   → native (bare)
  * Codes are preserved verbatim (case-sensitive). Soroban `C…` ids are rejected.
  */
 export function parseStellarAssetIdentifier(raw: string): StellarAsset {

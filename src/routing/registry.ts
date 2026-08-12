@@ -9,7 +9,7 @@
  */
 
 import { tryParseStellarAssetIdentifier } from '../core/assets.js'
-import { RECIPIENT_CAPABLE_PROVIDERS, STELLAR_PROVIDERS } from '../core/types.js'
+import { isThirdPartyRecipient, providersForRecipient } from '../core/selection.js'
 import { ProviderGetQuote } from '../providers/types.js'
 import { getQuote as aquariusQuote, PROVIDER as AQUARIUS } from '../providers/aquarius/index.js'
 import { getQuote as axelarQuote, PROVIDER as AXELAR_ITS } from '../providers/axelar/index.js'
@@ -77,7 +77,7 @@ export function discoverProviders(input: DiscoveryInput): Discovery {
 
   const kind: PairKind = axelar ? 'axelar' : stellarPair ? 'stellar' : 'cross-chain'
   const thirdPartyRecipient =
-    stellarPair && !!input.sourceAddress && !!input.destinationAddress && input.destinationAddress !== input.sourceAddress
+    stellarPair && !!input.sourceAddress && isThirdPartyRecipient(input.sourceAddress, input.destinationAddress)
 
   let providers: string[]
   if (input.providers && input.providers.length > 0) {
@@ -87,7 +87,7 @@ export function discoverProviders(input: DiscoveryInput): Discovery {
   } else if (stellarPair) {
     // STELLARBROKER and AQUARIUS settle on the trader's own account and cannot pay a different
     // destination, so a third-party recipient narrows the fan-out to the two that can.
-    providers = thirdPartyRecipient ? [...RECIPIENT_CAPABLE_PROVIDERS] : [...STELLAR_PROVIDERS]
+    providers = providersForRecipient(thirdPartyRecipient)
   } else {
     providers = [NEAR]
   }
